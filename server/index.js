@@ -33,6 +33,11 @@ import {
   refreshCampusAggregator
 } from "./campusAggregator.js";
 import {
+  GITHUB_JOB_SOURCES,
+  getGitHubJobSources,
+  refreshGitHubJobSources
+} from "./githubJobSources.js";
+import {
   closeBossBrowser,
   getBossStatus,
   runBossApply,
@@ -103,7 +108,7 @@ app.get("/api/jobs/library", (req, res) => {
     query: req.query?.query || "",
     type: req.query?.type || "campus"
   });
-  res.json({ jobs, sources: [CAMPUS_AGGREGATOR_SOURCE] });
+  res.json({ jobs, sources: getGitHubJobSources() });
 });
 
 app.post("/api/profile/parse", (req, res) => {
@@ -197,8 +202,16 @@ app.post("/api/jobs/live", async (req, res, next) => {
   try {
     const profile = req.body?.profile || memory.profile || parseResumeText("").profile;
     const sourceIds = req.body?.sourceIds || [];
-    const useAggregator = !sourceIds.length || sourceIds.includes(CAMPUS_AGGREGATOR_SOURCE.id);
-    const result = useAggregator ? await refreshCampusAggregator({
+    const githubSourceIds = new Set(GITHUB_JOB_SOURCES.map((source) => source.id));
+    const selectedGitHubSources = sourceIds.filter((sourceId) => githubSourceIds.has(sourceId));
+    const useGitHubSources = !sourceIds.length || selectedGitHubSources.length > 0;
+    const useLegacyAggregator = !useGitHubSources && sourceIds.includes(CAMPUS_AGGREGATOR_SOURCE.id);
+    const result = useGitHubSources ? await refreshGitHubJobSources({
+      sourceIds: selectedGitHubSources,
+      query: req.body?.query || "",
+      type: req.body?.type || "campus",
+      profile
+    }) : useLegacyAggregator ? await refreshCampusAggregator({
       query: req.body?.query || "",
       type: req.body?.type || "campus",
       profile

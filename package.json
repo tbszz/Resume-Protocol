@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "server": "node server/index.js",
-    "app": "npm run build && node server/index.js"
+    "app": "npm run build && node server/index.js",
+    "test": "node server/campusAggregator.test.js && node server/githubJobSources.test.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

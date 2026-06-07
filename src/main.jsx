@@ -63,7 +63,7 @@ Python、FastAPI、React、Vite、SQLite、RAG、LLM、Agent、Prompt Engineerin
 
 const DEFAULT_JD = `岗位要求：负责 AI Agent / RAG 应用开发，熟悉 Python、FastAPI、Prompt Engineering、检索增强生成、评测 benchmark，能把 AI 能力落地为可用产品。`;
 const TYPE_LABELS = { campus: "校招", internship: "实习", social: "社招" };
-const DEFAULT_SOURCE_IDS = ["campus-aggregator"];
+const DEFAULT_SOURCE_IDS = ["speedy-ai", "speedy-swe", "zapply-swe", "0voice-spring"];
 
 function App() {
   const [rawMaterial, setRawMaterial] = useState(SAMPLE_MATERIAL);
@@ -976,7 +976,7 @@ function OpportunityList({ jobs, onQueue, onSelect, selectedJobId }) {
           <button type="button" className="opportunity-main" onClick={() => onSelect(job)}>
             <span className="opportunity-company">{job.company || "未知公司"} · {TYPE_LABELS[job.type] || job.type || "岗位"}</span>
             <strong>{job.title}</strong>
-            <p>{job.location || job.city || "多城市"} · {job.source === "campus-aggregator" ? "聚合源" : job.sourceStatus === "reachable" ? "官方源可达" : "来源待确认"}</p>
+            <p>{job.location || job.city || "多城市"} · {job.source === "github-job-source" ? "GitHub源" : job.source === "campus-aggregator" ? "聚合源" : job.sourceStatus === "reachable" ? "官方源可达" : "来源待确认"}</p>
             <div className="opportunity-bars">
               {Object.entries(job.opportunityBreakdown || {}).slice(0, 5).map(([key, value]) => (
                 <span key={key} style={{ "--bar": `${Math.max(8, Math.min(100, value || 0))}%` }}>

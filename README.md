@@ -18,9 +18,9 @@ Resume Protocol 是一个本地运行的多岗位简历生成、岗位情报和�
 3. 岗位情报库
    - 内置 AI、后端、前端、产品、运营岗位画像。
    - 每类岗位区分校招、实习、社招要求。
-   - 当前默认使用第三方 2026 校招聚合源，后端抓取页面内嵌 `RAW_DATA` 并结构化为岗位卡。
-   - 聚合源包含公司、批次、城市、岗位、网申链接、信息来源、行业、届别、学历等字段。
-   - 聚合源会标记为第三方情报，不和官方招聘入口混淆，投递前保留原始来源链接用于复核。
+   - 当前默认使用 GitHub 实时岗位源，接入 SpeedyApply AI/ML、SpeedyApply SWE、Zapply Software Jobs 和 0voice 计算机春招。
+   - GitHub 源解析公司、岗位、地点、薪资、投递链接、岗位年龄和来源仓库，并结构化为岗位卡。
+   - 聚合源会标记为 GitHub / 第三方情报，不和官方招聘入口混淆，投递前保留原始来源链接用于复核。
    - 支持粘贴大厂官网/招聘站岗位详情 URL 导入 JD。
 
 4. 模板库选择
@@ -139,8 +139,8 @@ https://www.zhipin.com/web/geek/job?query=AI%20Agent
 - `POST /api/profile/upload`：解析上传文件。
 - `POST /api/resume/generate`：按岗位、模板、JD 生成简历版本。
 - `POST /api/resume/formalize`：生成一页正式简历，优先 MiniMax，失败时本地规则生成。
-- `GET /api/jobs/library`：读取本地岗位情报库。
-- `POST /api/jobs/live`：刷新第三方校招聚合源并生成岗位情报卡。
+- `GET /api/jobs/library`：读取本地岗位情报库和 GitHub 岗位源列表。
+- `POST /api/jobs/live`：刷新 GitHub 实时岗位源并生成岗位情报卡。
 - `POST /api/jobs/import-url`：从岗位详情 URL 导入 JD。
 - `POST /api/jobs/demo`：生成示例岗位。
 - `POST /api/jobs/score`：给岗位列表计算匹配分。
