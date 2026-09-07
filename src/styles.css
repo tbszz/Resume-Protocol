@@ -2394,6 +2394,15 @@ textarea:focus-visible {
   outline-offset: 3px;
 }
 
+.agent-composer:focus-within {
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 30px 80px rgba(8, 15, 14, 0.42), 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
+
+.agent-composer textarea:focus-visible {
+  outline: 0;
+}
+
 .product-shell {
   display: block;
   min-height: 100vh;
