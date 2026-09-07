@@ -36,11 +36,18 @@ Resume Protocol 是一个本地运行的多岗位简历生成、岗位情报和�
    - 项目经历和实习/工作经历会分开处理，并做重复内容去重。
 
 6. 生成针对性岗位素材
-   - 自动重写个人简介、技能栈、项目经历、实习经历和 Boss 打招呼语。
+   - 按目标岗位和 JD 对项目进行相关度排序，同一项目会为 AI、后端、前端、产品、运营岗位切换不同叙事重心。
+   - 每条项目内容都保留原始事实、命中关键词、相关度和量化证据状态；系统只重排已有事实，不新增指标或职责。
+   - 正式一页简历与岗位版素材复用同一份岗位化项目 bullet，避免两个出口内容不一致。
    - 保留“改写差异”视图，鼠标悬停横线时流式展开针对性修改点。
    - 支持导出 JSON 变体包和浏览器打印 PDF。
 
-7. Boss 岗位抓取和投递
+7. 面试作战室
+   - 根据目标岗位生成 4 条技术复习主线、项目深挖问题和简历自证清单。
+   - 自动把入选项目整理为 STAR 故事库，并提示指标口径、方案取舍、故障定位和失败复盘等追问。
+   - 提供从 JD 校准、项目讲稿、技术复习到模拟面试的 7 天冲刺计划。
+
+8. Boss 岗位抓取和投递
    - 启动本地 Chrome/Edge 持久化浏览器，由用户手动登录 Boss 账号。
    - 在 Boss 搜索结果页抓取岗位卡片，提取职位、公司、地点、薪资、链接和描述。
    - 对岗位做匹配评分，加入投递队列。
@@ -55,6 +62,17 @@ Resume Protocol 是一个本地运行的多岗位简历生成、岗位情报和�
 本地自动化 API 只接受 `127.0.0.1` / `localhost` 的产品页面或开发页面来源，避免其他网页跨域触发本机投递接口。
 
 真实投递可能受平台规则和账号风控影响，建议先使用 dry-run 验证队列和打招呼语，再少量执行。
+
+## 简历策略依据
+
+产品遵循“事实源 → JD 映射 → 项目排序 → 岗位化 bullet → 面试追问”的证据链。参考资料包括：
+
+- [Google 学生简历建议](https://students.googleblog.com/2015/07/google-interns-top-5-resume-tips.html)：针对岗位定制、只写能深入解释的经历、用事实和指标量化影响。
+- [Microsoft 面试建议](https://careers.microsoft.com/v2/global/en/hiring-tips/interview-tips.html)：研究岗位，准备具体案例，并用 STAR(R) 组织回答。
+- [Amazon SDE 技术主题](https://amazon.jobs/content/en/how-we-hire/interview-prep/software-development-topics)：按编码、系统设计、数据库、操作系统、网络和 AI/ML 等主线复习。
+- [Meta 软件工程面试准备](https://www.metacareers.com/blog/preparing-for-your-software-engineering-interview-at-meta/)：限时练习、讲清思考过程、检查边界与 bug，并准备行为故事。
+
+GitHub 产品结构参考：[Resume Matcher](https://github.com/srbhr/Resume-Matcher)、[Reactive Resume](https://github.com/amruthpillai/reactive-resume)、[OpenResume](https://github.com/xitanggg/open-resume) 和 [job-hunt-copilot](https://github.com/spontaneousai/job-hunt-copilot)。这些项目只用于交互与工作流借鉴，不作为招聘结论的权威来源。资料最后核验日期：2026-09-07。
 
 ## 技术栈
 

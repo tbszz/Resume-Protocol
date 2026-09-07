@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createFormalResume, generateVariant } from "./resumeEngine.js";
+import { createFormalResume, generateVariant, parseResumeText } from "./resumeEngine.js";
 
 const profile = {
   name: "李明",
@@ -52,6 +52,22 @@ const jd = "负责 React、TypeScript 前端开发，重视组件化、响应式
 
   const formal = createFormalResume({ profile, role: "backend", template: "ats", jd: "Python FastAPI 数据库 接口 性能" });
   assert.deepEqual(formal.projects, variant.projects.slice(0, 3), "正式简历应复用岗位化项目内容");
+}
+
+{
+  const parsed = parseResumeText(`张三
+教育经历
+某某大学 软件工程 本科 2023-2027
+项目经历
+PPTSight 文档问答系统：基于 FastAPI、React、SQLite FTS5 和 RAG 实现多格式文档问答，测试集 2047 题。
+SafeFile 文件整理助手：基于 Python、OCR 和 Web UI 实现预览、确认执行和撤销，51 个单元测试通过。
+实习经历
+参与 AI 工具原型设计和前后端联调，负责整理需求、实现页面、编写测试。
+技能
+Python、FastAPI、React、SQLite、RAG、Git`);
+  assert.equal(parsed.profile.projects.length, 2, "应按项目经历 section 提取独立项目");
+  assert.equal(parsed.profile.projects.some((item) => item.includes("实习经历")), false, "项目不得吞入实习 section");
+  assert.equal(parsed.profile.projects.some((item) => item.startsWith("技能")), false, "项目不得吞入技能 section");
 }
 
 console.log("resumeEngine tests passed");

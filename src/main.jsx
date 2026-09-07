@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowRight,
   Bot,
   Camera,
@@ -11,6 +12,7 @@ import {
   FileSearch,
   FileText,
   Loader2,
+  Menu,
   MonitorUp,
   Play,
   Plus,
@@ -65,7 +67,90 @@ const DEFAULT_JD = `岗位要求：负责 AI Agent / RAG 应用开发，熟悉 P
 const TYPE_LABELS = { campus: "校招", internship: "实习", social: "社招" };
 const DEFAULT_SOURCE_IDS = ["speedy-ai", "speedy-swe", "zapply-swe", "0voice-spring"];
 
+function SiteNav({ menuOpen, onMenuToggle, onNavigate }) {
+  const links = [
+    ["流程", "#workflow"],
+    ["岗位雷达", "#jobs"],
+    ["正式简历", "#resume"],
+    ["面试作战室", "#interview"]
+  ];
+  return (
+    <>
+      <nav className="site-nav" aria-label="主导航">
+        <a className="brand-mark" href="#top" onClick={onNavigate}>RESUME<span>®</span>PROTOCOL</a>
+        <div className="nav-links">
+          {links.map(([label, href]) => <a key={href} href={href}>{label}</a>)}
+        </div>
+        <a className="nav-cta" href="#materials">开始构建 <ArrowRight size={15} /></a>
+        <button className="menu-trigger" type="button" onClick={onMenuToggle} aria-expanded={menuOpen} aria-label="打开导航">
+          {menuOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
+      </nav>
+      {menuOpen ? (
+        <div className="mobile-menu" role="dialog" aria-label="移动导航">
+          {links.map(([label, href]) => <a key={href} href={href} onClick={onNavigate}>{label}<ArrowRight /></a>)}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function Hero({ role, roleScores, selectedJob, variant, onRoleChange }) {
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  const phrases = ["岗位真正要的证据", "面试能够讲清的项目", "一页经得起追问的简历"];
+  useEffect(() => {
+    const timer = window.setInterval(() => setPhraseIndex((current) => (current + 1) % phrases.length), 2600);
+    return () => window.clearInterval(timer);
+  }, []);
+  const activeRole = ROLE_CARDS.find((item) => item.id === role) || ROLE_CARDS[0];
+  const evidenceTokens = [
+    selectedJob ? `${selectedJob.company} / ${selectedJob.title}` : `${activeRole.label} / 等待目标 JD`,
+    ...(variant?.strengths || [activeRole.hint]),
+    ...(variant?.gaps?.map((item) => `待补：${item}`) || ["事实优先", "不虚构指标"])
+  ];
+  return (
+    <section className="hero" id="top">
+      <div className="hero-kicker"><span>CAREER OPERATING SYSTEM</span><span>SHANGHAI · LOCAL FIRST · 2026</span></div>
+      <div className="hero-copy">
+        <p className="hero-index">[ 01 / POSITIONING ]</p>
+        <h1>把你的经历<br />写成<span>{phrases[phraseIndex]}</span><i aria-hidden="true">_</i></h1>
+        <p className="hero-deck">不是把 JD 关键词塞进简历，而是选择最相关的事实、重排项目叙事，并提前准备每一句可能引出的面试追问。</p>
+      </div>
+      <div className="role-switcher" aria-label="目标岗位">
+        {ROLE_CARDS.map((item) => (
+          <button key={item.id} type="button" className={role === item.id ? "active" : ""} onClick={() => onRoleChange(item.id)}>
+            <span>{item.label}</span><strong>{roleScores[item.id]?.score ?? roleScores[item.id] ?? "—"}</strong><small>{item.hint}</small>
+          </button>
+        ))}
+      </div>
+      <EvidenceTape items={evidenceTokens} />
+      <a className="scroll-cue" href="#materials"><span>进入工作流</span><ArrowDown size={18} /></a>
+    </section>
+  );
+}
+
+function EvidenceTape({ items }) {
+  const rows = [...items, ...items];
+  return (
+    <div className="evidence-tape" aria-label="当前岗位证据">
+      <div>{rows.map((item, index) => <span key={`${item}-${index}`}>◆ {item}</span>)}</div>
+    </div>
+  );
+}
+
+function SiteFooter() {
+  return (
+    <footer className="site-footer">
+      <div><span>RESUME PROTOCOL</span><strong>MAKE EVERY LINE<br />DEFENSIBLE.</strong></div>
+      <div><span>OUTPUT</span><a href="#resume">A4 Resume</a><a href="#interview">Interview Map</a><a href="#jobs">Job Radar</a></div>
+      <div><span>PRINCIPLE</span><p>事实先于包装。证据先于关键词。每一条都准备好被追问。</p></div>
+      <small>© 2026 · LOCAL-FIRST CAREER TOOL</small>
+    </footer>
+  );
+}
+
 function App() {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [rawMaterial, setRawMaterial] = useState(SAMPLE_MATERIAL);
   const [fileName, setFileName] = useState("");
   const [profileResult, setProfileResult] = useState(null);
@@ -385,14 +470,24 @@ function App() {
 
   return (
     <main className="product-shell">
+      <div className="grain-layer" aria-hidden="true" />
+      <SiteNav menuOpen={menuOpen} onMenuToggle={() => setMenuOpen((current) => !current)} onNavigate={() => setMenuOpen(false)} />
+      <Hero
+        role={role}
+        roleScores={roleScores}
+        selectedJob={selectedJob}
+        variant={variant}
+        onRoleChange={setRole}
+      />
+      <section className="protocol-stage" id="workflow">
       <aside className="side-rail">
         <div className="system-lines">
-          <span>SYSTEM // RESUME_PROTOCOL V5.0</span>
-          <span>MODE // REAL_WORKFLOW</span>
-          <span>FORMAL_RESUME // A4_ONE_PAGE</span>
+          <span>PROTOCOL // 01—08</span>
+          <span>MODE // EVIDENCE_FIRST</span>
+          <span>OUTPUT // RESUME + INTERVIEW</span>
         </div>
-        <h1>RESUME<br />OPS<br />OS</h1>
-        <p>先补齐教育、实习、项目、技能、证书，再选岗位情报和模板，最后生成一页正式简历并投递。</p>
+        <h1>BUILD<br />YOUR<br />CASE.</h1>
+        <p>每一条简历，都应该是一段你能在面试里讲清楚的证据。</p>
         <StepList profile={profile} completeness={completeness} selectedJob={selectedJob} selectedTemplate={selectedTemplate} formalResume={formalResume} variant={variant} jobs={jobs} queue={queue} bossStatus={bossStatus} />
       </aside>
 
@@ -410,7 +505,7 @@ function App() {
         </header>
 
         <section className="pipeline-grid">
-          <Panel title="01 / 原始材料收件箱" icon={<Upload size={18} />}>
+          <Panel id="materials" title="01 / 原始材料收件箱" icon={<Upload size={18} />}>
             <div className="upload-row">
               <label className="file-pick">
                 <input type="file" accept=".txt,.md,.json,.pdf,.docx" onChange={uploadFile} />
@@ -447,7 +542,7 @@ function App() {
             )}
           </Panel>
 
-          <Panel title="03 / 岗位雷达" icon={<Target size={18} />} wide>
+          <Panel id="jobs" title="03 / 岗位雷达" icon={<Target size={18} />} wide>
             <RadarSummaryCard
               summary={radarSummary}
               job={activeRadarJob}
@@ -494,7 +589,7 @@ function App() {
             <TemplateLibrary templates={templateLibrary} selected={template} onSelect={setTemplate} />
           </Panel>
 
-          <Panel title="05 / 正式一页简历预览" icon={<FileText size={18} />} wide className="resume-print-panel">
+          <Panel id="resume" title="05 / 正式一页简历预览" icon={<FileText size={18} />} wide className="resume-print-panel">
             {!formalResume ? (
               <EmptyState text={selectedJob && selectedTemplate ? "点击“AI 整合成正式一页简历”后，这里会生成带头像的一页正式简历。" : "请先完成信息分析，并选择目标岗位和简历模板，再生成正式简历。"} />
             ) : (
@@ -510,8 +605,8 @@ function App() {
             </div>
           </Panel>
 
-          <Panel title="06 / 岗位版简历素材" icon={<Target size={18} />} wide>
-            {!variant ? <EmptyState text="生成后会显示摘要、技能、项目经历、实习经历、招呼语、差异说明和缺口。" /> : <ResumeVariant variant={variant} />}
+          <Panel id="interview" title="06 / 岗位证据与面试作战室" icon={<Target size={18} />} wide>
+            {!variant ? <EmptyState text="生成后会显示项目入选理由、岗位化 bullet、事实证据、项目追问和 7 天复习路线。" /> : <ResumeVariant variant={variant} />}
             <div className="action-row">
               <button className="primary-action compact-action" type="button" onClick={generateResume} disabled={!canGenerate || !selectedJob || busy === "generate"}>
                 {busy === "generate" ? <Loader2 className="spin" size={17} /> : <Wand2 size={17} />}
@@ -551,6 +646,8 @@ function App() {
           </Panel>
         </section>
       </section>
+      </section>
+      <SiteFooter />
     </main>
   );
 }
@@ -601,9 +698,9 @@ function Metric({ label, value }) {
   return <div className="metric"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function Panel({ title, icon, children, wide = false, className = "" }) {
+function Panel({ id, title, icon, children, wide = false, className = "" }) {
   return (
-    <section className={`${wide ? "panel wide" : "panel"} ${className}`}>
+    <section id={id} className={`${wide ? "panel wide" : "panel"} ${className}`}>
       <div className="panel-head">{icon}<h3>{title}</h3></div>
       {children}
     </section>
@@ -1133,24 +1230,88 @@ function SkillList({ items = [] }) {
 function ResumeVariant({ variant }) {
   return (
     <article className="resume-card">
-      <header>
+      <header className="variant-hero">
         <div>
-          <span className="tag">{variant.roleLabel} // {variant.templateLabel}</span>
+          <span className="tag">TARGET CASE // {variant.roleLabel}</span>
           <h3>{variant.title}</h3>
+          <p>{variant.summary}</p>
         </div>
-        <div className="score-badge">{variant.fitScore}</div>
+        <div className="score-badge"><strong>{variant.fitScore}</strong><span>FIT / 100</span></div>
       </header>
-      <p>{variant.summary}</p>
       <StreamDecode text={variant.diff.join("  ")} />
-      <h4>技能栈</h4>
-      <div className="mini-tags">{variant.skills.map((skill) => <span key={skill}>{skill}</span>)}</div>
-      <h4>项目经历</h4>
-      {variant.projects.map((item) => <p className="bullet" key={item}>• {item}</p>)}
-      <h4>实习经历</h4>
-      {variant.experience.length ? variant.experience.map((item) => <p className="bullet" key={item}>• {item}</p>) : <p className="muted">原始材料中实习经历不足，建议补充职责、动作和结果。</p>}
-      <h4>Boss 打招呼语</h4>
-      <div className="greeting">{variant.greeting}</div>
+      <section className="variant-skills">
+        <div><span>ATS KEYWORDS</span><strong>{variant.atsScore}</strong></div>
+        <div className="mini-tags">{variant.skills.map((skill) => <span key={skill}>{skill}</span>)}</div>
+      </section>
+      <section className="evidence-section">
+        <div className="section-intro">
+          <span>01 / PROJECT EVIDENCE</span>
+          <h4>为什么选这些项目，<br />面试官会怎么追问。</h4>
+          <p>排序来自目标岗位与 JD 命中度；改写只重排原始事实，不新增指标。</p>
+        </div>
+        <div className="evidence-list">
+          {(variant.projectStrategy || []).map((project, index) => <ProjectEvidence key={project.id || project.title} project={project} index={index} />)}
+        </div>
+      </section>
+      {variant.interviewPlan ? <InterviewWorkspace plan={variant.interviewPlan} /> : null}
+      <section className="supporting-copy">
+        <div>
+          <span>实习 / 工作证据</span>
+          {variant.experience.length ? variant.experience.map((item) => <p className="bullet" key={item}>• {item}</p>) : <p className="muted">原始材料中实习经历不足，建议补充职责、动作和结果。</p>}
+        </div>
+        <div>
+          <span>沟通开场</span>
+          <div className="greeting">{variant.greeting}</div>
+        </div>
+      </section>
     </article>
+  );
+}
+
+function ProjectEvidence({ project, index }) {
+  return (
+    <article className="evidence-card">
+      <div className="evidence-rank"><span>0{index + 1}</span><strong>{project.relevanceScore}</strong><small>RELEVANCE</small></div>
+      <div className="evidence-content">
+        <header><h5>{project.title}</h5><span className={project.evidenceStatus}>{project.evidenceStatus === "quantified" ? "已有量化证据" : "建议补充指标"}</span></header>
+        <div className="keyword-line">{project.matchedKeywords.length ? project.matchedKeywords.map((item) => <b key={item}>{item}</b>) : <b>待补岗位关键词</b>}</div>
+        <p className="tailored-bullet">{project.tailoredBullet}</p>
+        <details>
+          <summary>查看原始事实与面试追问 <ArrowRight size={15} /></summary>
+          <p className="source-copy">{project.original}</p>
+          <ol>{project.interviewQuestions.map((question) => <li key={question}>{question}</li>)}</ol>
+        </details>
+      </div>
+    </article>
+  );
+}
+
+function InterviewWorkspace({ plan }) {
+  return (
+    <section className="interview-workspace">
+      <div className="section-intro inverse">
+        <span>02 / INTERVIEW DEFENSE</span>
+        <h4>简历写完，<br />面试才刚开始。</h4>
+        <p>围绕 {plan.roleLabel} 的项目深挖、技术主线和行为故事进行复习。</p>
+      </div>
+      <div className="interview-content">
+        <div className="topic-grid">
+          {plan.technicalTopics.map((topic) => (
+            <article key={topic.id}><span>{topic.priority}</span><h5>{topic.title}</h5><p>{topic.why}</p></article>
+          ))}
+        </div>
+        <div className="schedule">
+          <header><span>7-DAY SPRINT</span><strong>从简历到可面试</strong></header>
+          {plan.schedule.map((item) => (
+            <div key={item.day}><b>{item.day}</b><strong>{item.title}</strong><p>{item.action}</p></div>
+          ))}
+        </div>
+        <details className="defense-questions">
+          <summary>展开完整追问清单 <span>{plan.resumeDefense.length} QUESTIONS</span></summary>
+          <ol>{plan.resumeDefense.map((question) => <li key={question}>{question}</li>)}</ol>
+        </details>
+      </div>
+    </section>
   );
 }
 

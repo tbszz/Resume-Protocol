@@ -439,13 +439,45 @@ function extractBlocks(lines, keys) {
 }
 
 function extractProjectBlocks(lines) {
-  return extractBlocks(lines, ["项目", "Project", "Hackathon", "系统", "平台", "Agent", "RAG", "应用", "工具", "引擎"]);
+  const sectionItems = extractNamedSection(lines, ["项目经历", "项目经验", "Projects", "Project Experience"], "project");
+  if (sectionItems.length) return sectionItems;
+  return extractBlocks(lines, ["项目", "Project", "Hackathon", "系统", "平台", "Agent", "RAG", "应用", "工具", "引擎"])
+    .map((item) => sanitizeResumeSection(item, "project"))
+    .filter(Boolean);
 }
 
 function extractExperienceBlocks(lines, projects) {
-  const blocks = extractBlocks(lines, ["实习", "工作经历", "工作", "公司", "岗位", "职责", "任职", "Experience", "Intern"]);
+  const sectionItems = extractNamedSection(lines, ["实习经历", "工作经历", "实践经历", "Experience", "Internship Experience"], "experience");
+  const blocks = sectionItems.length
+    ? sectionItems
+    : extractBlocks(lines, ["实习", "工作经历", "工作", "公司", "岗位", "职责", "任职", "Experience", "Intern"]);
   const projectFingerprints = new Set(projects.map(fingerprint));
   return blocks.filter((block) => !projectFingerprints.has(fingerprint(block)) || /实习|公司|岗位|任职|Intern/i.test(block));
+}
+
+function extractNamedSection(lines, headings, type) {
+  const normalizedHeadings = headings.map((heading) => heading.toLowerCase());
+  const start = lines.findIndex((line) => {
+    const normalizedLine = line.replace(/[：:]$/, "").trim().toLowerCase();
+    return normalizedHeadings.includes(normalizedLine);
+  });
+  if (start < 0) return [];
+  const items = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (isResumeSectionHeading(line)) break;
+    const sanitized = line
+      .replace(/^[-•·*]\s*/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (/^https?:\/\//i.test(sanitized) || /邮箱|手机|联系方式|电话|微信/i.test(sanitized)) continue;
+    if (sanitized) items.push(sanitized);
+  }
+  return dedupeStrings(items);
+}
+
+function isResumeSectionHeading(line) {
+  return /^(?:个人简介|求职目标|教育经历|教育背景|项目经历|项目经验|实习经历|工作经历|实践经历|技能|技能栈|专业技能|荣誉|奖项|证书|自我评价|projects?|project experience|experience|internship experience|skills?|education|awards?)[：:]?$/i.test(String(line || "").trim());
 }
 
 function inferProjectBlocksFromLongText(text) {
