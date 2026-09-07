@@ -9,7 +9,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "server": "node server/index.js",
     "app": "npm run build && node server/index.js",
-    "test": "node server/resumeEngine.test.js && node server/campusAggregator.test.js && node server/githubJobSources.test.js"
+    "test": "node src/agentIntent.test.js && node server/resumeEngine.test.js && node server/campusAggregator.test.js && node server/githubJobSources.test.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
