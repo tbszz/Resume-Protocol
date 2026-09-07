@@ -75,6 +75,39 @@ export const ROLE_PROFILES = {
   }
 };
 
+const INTERVIEW_BLUEPRINTS = {
+  ai: [
+    ["RAG 与检索", "能解释切分、召回、重排、引用和评测之间的取舍"],
+    ["模型与 Prompt", "能说明模型选择、提示词迭代、失败样本与安全边界"],
+    ["AI 工程化", "能讨论接口、缓存、降级、可观测性、成本与延迟"],
+    ["评测体系", "能区分离线指标、人工评测与线上业务指标"]
+  ],
+  backend: [
+    ["接口与数据模型", "能从需求推导 API、表结构、幂等和错误码"],
+    ["性能与并发", "能定位瓶颈并解释缓存、队列、批处理与限流"],
+    ["稳定性", "能说明日志、监控、重试、降级和故障恢复"],
+    ["计算机基础", "复习数据库、网络、操作系统和常用数据结构"]
+  ],
+  frontend: [
+    ["React 状态与组件", "能解释组件边界、状态归属和副作用管理"],
+    ["性能与体验", "能说明渲染、加载、缓存、可访问性和指标验证"],
+    ["浏览器与网络", "复习事件循环、渲染流程、HTTP 与安全基础"],
+    ["工程质量", "能讨论类型、测试、构建、监控和渐进式交付"]
+  ],
+  product: [
+    ["需求与优先级", "能从用户问题推导目标、范围和取舍"],
+    ["指标体系", "能定义北极星指标、漏斗与实验判定"],
+    ["AI 产品边界", "能说明能力评估、失败兜底与人机协同"],
+    ["协作与推进", "能用具体案例解释对齐、冲突与复盘"]
+  ],
+  ops: [
+    ["用户与内容", "能说明分层、触达、内容策略和渠道差异"],
+    ["增长漏斗", "能拆解获客、激活、留存、转化和复购"],
+    ["数据复盘", "能解释指标波动、归因假设与下一步实验"],
+    ["AI 提效", "能量化自动化前后的成本、质量和风险"]
+  ]
+};
+
 export const TEMPLATES = {
   ats: {
     label: "ATS 一页版",
@@ -143,11 +176,13 @@ export function generateVariant({ profile, role = "ai", template = "ats", jd = "
   const templateProfile = TEMPLATES[template] || TEMPLATES.ats;
   const roleScore = scoreRole(profile, role, jd);
   const selectedSkills = rankSkills(profile.skills, roleProfile.keywords);
-  const selectedProjects = selectProjects(profile.projects, roleProfile.keywords, jd);
+  const projectStrategy = buildProjectStrategy(profile.projects, roleProfile, jd, profile.metrics);
+  const selectedProjects = projectStrategy.map((item) => item.original);
   const selectedExperience = selectProjects(profile.experience, roleProfile.keywords, jd);
   const summary = buildSummary(profile, roleProfile, selectedSkills, roleScore);
-  const bullets = selectedProjects.map((project) => rewriteBlock(project, roleProfile, profile.metrics));
+  const bullets = projectStrategy.map((item) => item.tailoredBullet);
   const experienceBullets = selectedExperience.map((item) => rewriteBlock(item, roleProfile, profile.metrics));
+  const interviewPlan = buildInterviewPlan({ role, roleProfile, projectStrategy, gaps: roleScore.gaps, skills: selectedSkills });
 
   return {
     role,
@@ -166,6 +201,8 @@ export function generateVariant({ profile, role = "ai", template = "ats", jd = "
     greeting: buildGreeting(profile, roleProfile, selectedProjects[0], roleScore),
     strengths: roleScore.strengths,
     gaps: roleScore.gaps,
+    projectStrategy: projectStrategy.slice(0, 4),
+    interviewPlan,
     templateNotes: templateProfile.tone,
     sectionOrder: templateProfile.sectionOrder,
     diff: buildDiff(profile, roleProfile, selectedSkills)
@@ -176,7 +213,6 @@ export function createFormalResume({ profile, role = "ai", template = "aiResearc
   const roleProfile = ROLE_PROFILES[role] || ROLE_PROFILES.ai;
   const variant = generateVariant({ profile, role, template, jd });
   const education = profile.education.length ? profile.education.slice(0, 3) : ["教育经历待补充"];
-  const projects = normalizeResumeSection(profile.projects, "project").slice(0, 3);
   const experience = normalizeResumeSection(profile.experience, "experience").slice(0, 2);
   const awards = [...profile.awards, ...profile.metrics.map((metric) => `量化结果：${metric}`)].slice(0, 4);
 
@@ -193,8 +229,9 @@ export function createFormalResume({ profile, role = "ai", template = "aiResearc
     summary: compactSentence(variant.summary, 130),
     education,
     skills: variant.skills.slice(0, 16),
-    projects: (projects.length ? projects : ["项目经历待补充：建议补充项目背景、职责、技术栈和量化结果。"])
-      .map((item) => compactResumeBullet(item, roleProfile, profile.metrics, false)),
+    projects: variant.projects.length
+      ? variant.projects.slice(0, 3)
+      : ["项目经历待补充：建议补充项目背景、职责、技术栈和量化结果。"],
     experience: (experience.length ? experience : ["实习/工作经历待补充：可写课程项目、社团协作、个人产品或比赛经历。"])
       .map((item) => compactResumeBullet(item, roleProfile, profile.metrics, true)),
     awards,
@@ -525,6 +562,128 @@ function rankSkills(skills, keywords) {
 function selectProjects(items, keywords, jd) {
   const corpus = `${keywords.join(" ")} ${jd}`.toLowerCase();
   return [...items].sort((a, b) => scoreText(b, corpus) - scoreText(a, corpus));
+}
+
+function buildProjectStrategy(items, roleProfile, jd, metrics) {
+  const keywords = uniqueStrings([...roleProfile.keywords, ...extractJdKeywords(jd)]);
+  return (items || [])
+    .map((original, sourceIndex) => {
+      const matchedKeywords = keywords.filter((keyword) => looseIncludes(original, keyword));
+      const metricEvidence = (metrics || []).filter((metric) => String(original).includes(metric));
+      const title = extractProjectTitle(original, sourceIndex);
+      const tailoredBullet = tailorProjectBullet(original, keywords, title);
+      const rawScore = matchedKeywords.length * 12 + metricEvidence.length * 8 + (title ? 4 : 0);
+      const relevanceScore = Math.min(98, Math.max(36, 42 + rawScore));
+      return {
+        id: `project-${sourceIndex + 1}`,
+        title,
+        original,
+        tailoredBullet,
+        matchedKeywords: matchedKeywords.slice(0, 8),
+        relevanceScore,
+        emphasis: roleProfile.focus,
+        evidenceStatus: metricEvidence.length ? "quantified" : "needs-metric",
+        evidence: metricEvidence,
+        interviewQuestions: buildProjectQuestions(title, matchedKeywords, metricEvidence)
+      };
+    })
+    .sort((a, b) => b.relevanceScore - a.relevanceScore || a.title.localeCompare(b.title, "zh-CN"));
+}
+
+function extractJdKeywords(jd) {
+  const stopwords = new Set(["负责", "岗位", "要求", "熟悉", "掌握", "具备", "优先", "相关", "工作", "能力", "以及", "进行", "完成", "重视"]);
+  return String(jd || "")
+    .split(/[\s,，、/|;；:：()（）]+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2 && term.length <= 24 && !stopwords.has(term));
+}
+
+function looseIncludes(text, keyword) {
+  const haystack = String(text || "").toLowerCase();
+  const needle = String(keyword || "").toLowerCase();
+  if (!needle) return false;
+  if (haystack.includes(needle)) return true;
+  if (/^[\u4e00-\u9fff]{4,}$/.test(needle)) {
+    return [...new Set(needle.match(/[\u4e00-\u9fff]{2}/g) || [])].some((part) => haystack.includes(part));
+  }
+  return false;
+}
+
+function extractProjectTitle(block, sourceIndex) {
+  const text = String(block || "").trim();
+  const explicit = text.match(/^([^：:。；;]{2,32})[：:]/);
+  if (explicit) return explicit[1].replace(/^项目经历\s*/i, "").trim();
+  const firstPhrase = text.split(/[。；;，,]/)[0].replace(/^项目经历\s*/i, "").trim();
+  return firstPhrase.slice(0, 28) || `项目 ${sourceIndex + 1}`;
+}
+
+function tailorProjectBullet(original, keywords, title) {
+  const text = String(original || "").replace(/^项目经历\s*/i, "").trim().replace(/[。；;]+$/, "");
+  const body = text.replace(new RegExp(`^${escapeRegExp(title)}[：:]?`), "").trim();
+  const clauses = body.split(/[。；;]+/).map((item) => item.trim()).filter(Boolean);
+  const ranked = clauses
+    .map((clause, index) => ({ clause, index, score: keywords.filter((keyword) => looseIncludes(clause, keyword)).length }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((item) => item.clause)
+    .slice(0, 3);
+  const evidence = ranked.length ? ranked.join("；") : body;
+  return compactSentence(`${title}｜${evidence}`, 180);
+}
+
+function buildProjectQuestions(title, matchedKeywords, metricEvidence) {
+  const anchor = matchedKeywords[0] || "核心方案";
+  return [
+    `请用 30 秒说明「${title}」解决的问题、你的职责和最终结果。`,
+    `围绕 ${anchor}，你比较过哪些方案，为什么选择现在的实现？`,
+    `这个项目最难定位的一次问题是什么，你如何验证根因？`,
+    metricEvidence.length
+      ? `简历中的 ${metricEvidence.slice(0, 2).join("、")} 如何测得，测试口径和样本是什么？`
+      : "如果重做一次，你会补哪一个可量化指标来证明效果？"
+  ];
+}
+
+function buildInterviewPlan({ role, roleProfile, projectStrategy, gaps, skills }) {
+  const technicalTopics = (INTERVIEW_BLUEPRINTS[role] || INTERVIEW_BLUEPRINTS.ai).map(([title, why], index) => ({
+    id: `topic-${index + 1}`,
+    title,
+    why,
+    priority: index < 2 ? "P0" : "P1"
+  }));
+  const storyBank = projectStrategy.slice(0, 3).map((project) => ({
+    project: project.title,
+    opening: `我在「${project.title}」中重点解决了什么问题？`,
+    proof: project.evidence.length ? project.evidence.join(" / ") : "待补充量化结果",
+    roleConnection: project.matchedKeywords.length
+      ? `可证明 ${roleProfile.label} 所需的 ${project.matchedKeywords.slice(0, 4).join(" / ")}`
+      : `需要补充与 ${roleProfile.label} 更直接的证据`,
+    questions: project.interviewQuestions
+  }));
+  const gapFocus = gaps.length ? gaps.join("、") : "边界条件与失败复盘";
+  const topSkills = skills.slice(0, 4).join(" / ") || "岗位核心技能";
+  const schedule = [
+    ["Day 1", "校准 JD", `逐条标记岗位要求，并核对 ${topSkills} 的事实证据。`],
+    ["Day 2", "项目一号", storyBank[0] ? `完成「${storyBank[0].project}」2 分钟讲稿与追问。` : "补齐一个最相关项目的背景、动作和结果。"],
+    ["Day 3", "项目二号", storyBank[1] ? `完成「${storyBank[1].project}」方案取舍、失败与复盘。` : "准备第二个互补项目或课程实践。"],
+    ["Day 4", "技术主线", `复习 ${technicalTopics.slice(0, 2).map((item) => item.title).join("、")}，每题先讲思路再下结论。`],
+    ["Day 5", "补齐短板", `集中处理：${gapFocus}。只补能真实说明的证据。`],
+    ["Day 6", "模拟面试", "进行 45 分钟模拟：自我介绍、项目深挖、技术题、反问；记录卡顿点。"],
+    ["Day 7", "复盘收口", "压缩答案、复测薄弱题，准备 3 个针对团队和岗位的反问。"]
+  ].map(([day, title, action]) => ({ day, title, action }));
+  return {
+    roleLabel: roleProfile.label,
+    technicalTopics,
+    storyBank,
+    schedule,
+    resumeDefense: uniqueStrings(storyBank.flatMap((story) => story.questions)).slice(0, 8)
+  };
+}
+
+function uniqueStrings(items) {
+  return [...new Set((items || []).map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+function escapeRegExp(text) {
+  return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function scoreText(text, corpus) {
