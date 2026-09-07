@@ -1,137 +1,489 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  AlertTriangle,
-  ArrowDown,
-  ArrowRight,
   Bot,
-  Camera,
+  BriefcaseBusiness,
+  Check,
   CheckCircle2,
-  Database,
-  Download,
+  ChevronDown,
+  Circle,
   FileSearch,
   FileText,
-  Loader2,
+  LoaderCircle,
   Menu,
   MessageSquareText,
-  MonitorUp,
-  Play,
+  Paperclip,
   Plus,
-  Printer,
   Radar,
-  RefreshCw,
-  Save,
   Send,
   Sparkles,
-  Target,
-  Upload,
-  UserRound,
-  Wand2,
-  Zap,
+  Trash2,
+  WandSparkles,
   X
 } from "lucide-react";
+import { buildJobQueries, planAgentAction } from "./agentIntent.js";
+import { normalizeResultItems } from "./chatResults.js";
+import {
+  appendMessage,
+  createConversation,
+  deleteConversation,
+  loadChatState,
+  saveChatState,
+  updateConversationContext
+} from "./chatStore.js";
 import "./styles.css";
-import { planAgentAction } from "./agentIntent.js";
 
 const API_BASE = window.location.port === "8787" ? "" : "http://127.0.0.1:8787";
+const VIDEO_URL = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260402_134434_5de46cb4-38e7-42a6-a8bc-6e62b2fd6c7b.mp4";
 
-const ROLE_CARDS = [
-  { id: "ai", label: "AI 岗", title: "AI Agent / RAG", hint: "模型链路、RAG、评测、Prompt" },
-  { id: "backend", label: "后端", title: "Python 后端", hint: "接口、数据库、并发、日志" },
-  { id: "frontend", label: "前端", title: "React 前端", hint: "控制台、组件、状态、交互" },
-  { id: "product", label: "产品", title: "AI 产品", hint: "需求、流程、指标、竞品" },
-  { id: "ops", label: "运营", title: "AI 运营", hint: "内容、增长、转化、复盘" }
+const QUICK_PROMPTS = [
+  {
+    label: "诊断我的简历",
+    prompt: "帮我诊断当前简历，重点检查项目证据和信息完整度",
+    description: "找出缺失信息与薄弱证据",
+    icon: FileSearch
+  },
+  {
+    label: "寻找目标岗位",
+    prompt: "帮我找适合当前背景的 AI Agent 校招岗位",
+    description: "返回可直接选择的岗位候选",
+    icon: Radar
+  },
+  {
+    label: "生成岗位版简历",
+    prompt: "根据当前资料和目标 JD 生成岗位版简历",
+    description: "按 JD 重排技能与项目证据",
+    icon: WandSparkles
+  },
+  {
+    label: "准备项目面试",
+    prompt: "根据当前岗位版简历准备项目面试和追问",
+    description: "生成项目深挖与七天计划",
+    icon: MessageSquareText
+  }
 ];
 
-const TEMPLATE_CARDS = [
-  { id: "ats", label: "ATS 一页版", hint: "系统解析友好" },
-  { id: "cnTech", label: "中文技术版", hint: "技术项目优先" },
-  { id: "aiResearch", label: "AI 应用版", hint: "Agent/RAG 强化" },
-  { id: "productOps", label: "产品运营版", hint: "业务指标优先" }
-];
-
-const SAMPLE_MATERIAL = `张三
-邮箱 zhangsan@example.com  手机 13800138000  GitHub https://github.com/example
-
-教育经历
-某某大学 软件工程 本科 2023-2027
-
-项目经历
-PPTSight 企业文档结构化检索与问答系统：基于 FastAPI、React、SQLite FTS5、RAG 和 LLM 实现 PPT/PPTX/PDF 多格式文档问答。支持页面、chunk、fact 三层检索，正式测试集 2047 题，successRate 99.95%，normalizedScore 49.7591。
-SafeFile Agent 文件整理助手：基于 Python、LLM Adapter、OCR、Web UI 实现对话式文件整理 Agent。支持扫描、规划、安全预览、确认执行、undo 回滚和偏好学习，51 个单元测试通过，benchmark 24/24，score 100.0。
-
-实习经历
-参与 AI 工具原型设计和前后端联调，负责整理需求、实现页面、编写测试和输出演示材料。
-
-技能
-Python、FastAPI、React、Vite、SQLite、RAG、LLM、Agent、Prompt Engineering、Benchmark、Git、数据分析`;
-
-const DEFAULT_JD = `岗位要求：负责 AI Agent / RAG 应用开发，熟悉 Python、FastAPI、Prompt Engineering、检索增强生成、评测 benchmark，能把 AI 能力落地为可用产品。`;
-const TYPE_LABELS = { campus: "校招", internship: "实习", social: "社招" };
-const DEFAULT_SOURCE_IDS = ["speedy-ai", "speedy-swe", "zapply-swe", "0voice-spring"];
-
-function SiteNav({ menuOpen, onMenuToggle, onNavigate }) {
-  const links = [
-    ["Agent 入口", "#top"],
-    ["职业资料", "#materials"],
-    ["岗位雷达", "#jobs"],
-    ["正式简历", "#resume"],
-    ["面试作战室", "#interview"]
-  ];
-  return (
-    <>
-      <nav className="site-nav" aria-label="主导航">
-        <a className="brand-mark" href="#top" onClick={onNavigate}>RESUME <span>R/01</span> PROTOCOL</a>
-        <div className="nav-links">
-          {links.map(([label, href]) => <a key={href} href={href}>{label}</a>)}
-        </div>
-        <a className="nav-cta" href="#top">Ask Agent <ArrowRight size={15} /></a>
-        <button className="menu-trigger" type="button" onClick={onMenuToggle} aria-expanded={menuOpen} aria-label="打开导航">
-          {menuOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
-      </nav>
-      {menuOpen ? (
-        <div className="mobile-menu" role="dialog" aria-label="移动导航">
-          {links.map(([label, href]) => <a key={href} href={href} onClick={onNavigate}>{label}<ArrowRight /></a>)}
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-function AgentGateway({ context, selectedJob, onCommand }) {
-  const [prompt, setPrompt] = useState("");
-  const [messages, setMessages] = useState([
-    { role: "agent", text: "告诉我你现在想完成什么。我会检查前置条件，并带你进入正确步骤。" }
-  ]);
-  const [submitting, setSubmitting] = useState(false);
+function App() {
+  const [chatState, setChatState] = useState(() => loadChatState(window.localStorage));
+  const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
-  const quickActions = [
-    { label: "诊断当前简历", prompt: "帮我诊断当前简历的完整度和项目证据", icon: <FileSearch size={15} /> },
-    { label: "匹配目标岗位", prompt: "帮我找适合当前背景的 AI Agent 校招岗位", icon: <Radar size={15} /> },
-    { label: "生成岗位版", prompt: "根据已选择的 JD 生成岗位版简历", icon: <Wand2 size={15} /> },
-    { label: "准备项目面试", prompt: "根据当前岗位版简历准备项目面试和追问", icon: <MessageSquareText size={15} /> }
-  ];
+  const fileInputRef = useRef(null);
+  const endRef = useRef(null);
 
-  async function submit(nextPrompt = prompt) {
+  const activeConversation = useMemo(
+    () => chatState.conversations.find((item) => item.id === chatState.activeConversationId) || chatState.conversations[0],
+    [chatState]
+  );
+  const hasStarted = activeConversation.messages.some((message) => message.role === "user");
+
+  useEffect(() => {
+    saveChatState(window.localStorage, chatState);
+  }, [chatState]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [activeConversation.messages.length, pending]);
+
+  function addMessage(conversationId, role, content, extras = {}) {
+    setChatState((current) => appendMessage(current, conversationId, {
+      id: createId("message"),
+      role,
+      content,
+      kind: extras.kind || "text",
+      data: extras.data || null,
+      tone: extras.tone || "default",
+      createdAt: new Date().toISOString()
+    }));
+  }
+
+  function patchContext(conversationId, patch) {
+    setChatState((current) => updateConversationContext(current, conversationId, patch));
+  }
+
+  function createNewChat() {
+    const conversation = createConversation();
+    setChatState((current) => ({
+      ...current,
+      activeConversationId: conversation.id,
+      conversations: [conversation, ...current.conversations]
+    }));
+    setDraft("");
+    setSidebarOpen(false);
+  }
+
+  function selectConversation(conversationId) {
+    setChatState((current) => ({ ...current, activeConversationId: conversationId }));
+    setSidebarOpen(false);
+  }
+
+  function removeConversation(event, conversationId) {
+    event.stopPropagation();
+    setChatState((current) => deleteConversation(current, conversationId));
+  }
+
+  async function submitPrompt(nextPrompt = draft) {
     const value = String(nextPrompt || "").trim();
-    if (!value) {
-      setMessages((current) => [...current, { role: "agent", text: "先说你现在最想完成什么，我才能安排下一步。", tone: "warning" }]);
+    if (!value || pending) return;
+
+    const conversationId = activeConversation.id;
+    const snapshot = activeConversation;
+    setDraft("");
+    addMessage(conversationId, "user", value);
+    setPending({ conversationId, label: "正在理解你的目标" });
+
+    try {
+      await runAgent(value, snapshot, conversationId);
+    } catch (error) {
+      addMessage(
+        conversationId,
+        "assistant",
+        "这一步没有完成：" + error.message + "。你可以稍后重试，之前的聊天和资料不会丢失。",
+        { kind: "error", tone: "warning" }
+      );
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function runAgent(input, conversation, conversationId) {
+    let context = { ...conversation.context };
+    const pastedMaterial = looksLikeResumeMaterial(input);
+    const pastedJd = looksLikeJobDescription(input);
+
+    if (pastedMaterial) {
+      context = { ...context, material: input };
+      patchContext(conversationId, { material: input });
+    }
+
+    if (pastedJd) {
+      const selectedJob = createJobFromDescription(input);
+      context = { ...context, selectedJob };
+      patchContext(conversationId, { selectedJob });
+      if (!/简历|优化|生成|面试|追问/.test(input)) {
+        addMessage(
+          conversationId,
+          "assistant",
+          "已把这份 JD 设为当前目标岗位。接下来可以直接让我生成岗位版简历。",
+          { kind: "target", data: { job: selectedJob } }
+        );
+        return;
+      }
+    }
+
+    const plan = planAgentAction(input, {
+      hasMaterial: Boolean(context.material),
+      hasProfile: Boolean(context.profile),
+      hasJob: Boolean(context.selectedJob),
+      hasVariant: Boolean(context.variant)
+    });
+
+    if (plan.action === "request-material" || plan.action === "request-resume" || plan.action === "none") {
+      addMessage(conversationId, "assistant", plan.message);
       return;
     }
-    setPrompt("");
-    setSubmitting(true);
-    setMessages((current) => [...current, { role: "user", text: value }]);
-    const result = await onCommand(value);
-    setMessages((current) => [...current, { role: "agent", text: result.message, tone: result.tone || "default" }]);
-    setSubmitting(false);
+
+    if (plan.action === "analyze") {
+      await analyzeMaterial(conversationId, context.material || input, context);
+      return;
+    }
+
+    if (plan.action === "search-jobs") {
+      await searchJobs(conversationId, input, context);
+      return;
+    }
+
+    if (plan.action === "generate-resume") {
+      await generateResume(conversationId, context, input);
+      return;
+    }
+
+    if (plan.action === "prepare-interview") {
+      addMessage(
+        conversationId,
+        "assistant",
+        "我已经按当前岗位版整理了项目追问、技术主线和七天复习节奏。",
+        { kind: "interview", data: { plan: context.variant.interviewPlan } }
+      );
+      return;
+    }
+
+    addMessage(
+      conversationId,
+      "assistant",
+      "我是你的求职 Agent。把简历或 JD 直接发给我，或者告诉我想诊断简历、找岗位、生成岗位版、准备面试。我会在当前对话里完成，不需要切换页面。"
+    );
+  }
+
+  async function analyzeMaterial(conversationId, material, context) {
+    if (!material.trim()) {
+      addMessage(conversationId, "assistant", "请直接粘贴简历内容，或点击输入框左侧的附件按钮上传文件。");
+      return;
+    }
+    setPending({ conversationId, label: "正在分析职业资料" });
+    const result = await api("/api/intake/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: material,
+        role: inferRole(material, context.selectedJob),
+        job: context.selectedJob
+      })
+    });
+    const diagnosis = result.completeness || result.diagnosis || {};
+    patchContext(conversationId, {
+      material,
+      profile: result.profile,
+      diagnosis
+    });
+    addMessage(
+      conversationId,
+      "assistant",
+      "资料分析完成。当前完整度 " + (diagnosis.completeness || 0) + "%，下面是最值得先处理的证据。",
+      {
+        kind: "diagnosis",
+        data: {
+          completeness: diagnosis.completeness || 0,
+          strengths: diagnosis.strengths || result.diagnosis?.strengths || [],
+          gaps: diagnosis.missing || diagnosis.gaps || result.diagnosis?.gaps || []
+        }
+      }
+    );
+  }
+
+  async function searchJobs(conversationId, input, context) {
+    setPending({ conversationId, label: "正在匹配目标岗位" });
+    const queries = buildJobQueries(input, context.profile);
+    let result = { jobs: [] };
+    let matchedQuery = queries[0];
+    for (const query of queries) {
+      const params = new URLSearchParams({ type: inferJobType(input), query });
+      result = await api("/api/jobs/library?" + params.toString());
+      matchedQuery = query;
+      if (result.jobs?.length) break;
+    }
+    const jobs = [...(result.jobs || [])]
+      .sort((left, right) => (right.opportunityScore || right.matchScore || 0) - (left.opportunityScore || left.matchScore || 0))
+      .slice(0, 4);
+    patchContext(conversationId, { jobs });
+    addMessage(
+      conversationId,
+      "assistant",
+      jobs.length
+        ? "找到 " + jobs.length + " 个优先候选。选择一个目标岗位后，我会在后续消息里一直使用这份 JD。"
+        : "暂时没有找到匹配岗位。可以换一个方向或更具体的关键词再试一次。",
+      { kind: "jobs", data: { jobs, query: matchedQuery } }
+    );
+  }
+
+  async function generateResume(conversationId, context, input) {
+    setPending({ conversationId, label: "正在生成岗位版简历" });
+    const role = inferRole(input, context.selectedJob);
+    const jd = [
+      context.selectedJob?.description,
+      ...(context.selectedJob?.requirements || [])
+    ].filter(Boolean).join("\n");
+    const result = await api("/api/resume/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        profile: context.profile,
+        role,
+        template: role === "product" || role === "ops" ? "productOps" : "aiResearch",
+        jd
+      })
+    });
+    patchContext(conversationId, { variant: result.variant });
+    addMessage(
+      conversationId,
+      "assistant",
+      "岗位版已经生成，匹配度 " + result.variant.fitScore + "/100。每一条改写都保留了可追问的项目证据。",
+      { kind: "resume", data: { variant: result.variant } }
+    );
+  }
+
+  async function selectJob(conversationId, job) {
+    patchContext(conversationId, { selectedJob: job, variant: null });
+    addMessage(
+      conversationId,
+      "assistant",
+      "已选择「" + job.company + " · " + job.title + "」作为目标岗位。现在可以让我生成岗位版简历。",
+      { kind: "target", data: { job } }
+    );
+  }
+
+  async function handleFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || pending) return;
+    const conversationId = activeConversation.id;
+    addMessage(conversationId, "user", "上传了简历文件：" + file.name, {
+      kind: "attachment",
+      data: { filename: file.name }
+    });
+    setPending({ conversationId, label: "正在读取 " + file.name });
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const result = await api("/api/profile/upload", { method: "POST", body: form });
+      const diagnosis = result.diagnosis || {};
+      patchContext(conversationId, {
+        material: result.normalizedText || "",
+        profile: result.profile,
+        diagnosis
+      });
+      addMessage(
+        conversationId,
+        "assistant",
+        "文件读取完成。资料完整度 " + (diagnosis.completeness || 0) + "%，我已经保留这份画像供后续岗位和简历任务使用。",
+        {
+          kind: "diagnosis",
+          data: {
+            completeness: diagnosis.completeness || 0,
+            strengths: diagnosis.strengths || [],
+            gaps: diagnosis.gaps || []
+          }
+        }
+      );
+    } catch (error) {
+      addMessage(conversationId, "assistant", "文件没有读取成功：" + error.message, {
+        kind: "error",
+        tone: "warning"
+      });
+    } finally {
+      setPending(null);
+    }
   }
 
   return (
-    <section className={`agent-gateway${videoFailed ? " video-fallback" : ""}`} id="top">
+    <div className="chat-shell" data-sidebar-open={sidebarOpen}>
+      <button
+        className="sidebar-scrim"
+        type="button"
+        aria-label="关闭会话列表"
+        onClick={() => setSidebarOpen(false)}
+      />
+      <ConversationSidebar
+        conversations={chatState.conversations}
+        activeConversationId={activeConversation.id}
+        onNew={createNewChat}
+        onSelect={selectConversation}
+        onDelete={removeConversation}
+        onClose={() => setSidebarOpen(false)}
+      />
+
+      <main className={"conversation-stage" + (hasStarted ? " has-messages" : " is-empty")}>
+        <ChatHeader
+          conversation={activeConversation}
+          onMenu={() => setSidebarOpen(true)}
+          onNew={createNewChat}
+        />
+
+        {!hasStarted ? (
+          <WelcomeState
+            onPrompt={submitPrompt}
+            videoFailed={videoFailed}
+            onVideoError={() => setVideoFailed(true)}
+          />
+        ) : (
+          <MessageStream
+            conversation={activeConversation}
+            pending={pending?.conversationId === activeConversation.id ? pending : null}
+            onSelectJob={(job) => selectJob(activeConversation.id, job)}
+            endRef={endRef}
+          />
+        )}
+
+        <ChatComposer
+          draft={draft}
+          onDraft={setDraft}
+          onSubmit={submitPrompt}
+          onAttach={() => fileInputRef.current?.click()}
+          disabled={Boolean(pending)}
+        />
+        <input
+          ref={fileInputRef}
+          className="visually-hidden"
+          type="file"
+          accept=".pdf,.doc,.docx,.txt"
+          onChange={handleFile}
+          aria-label="上传简历文件"
+        />
+      </main>
+    </div>
+  );
+}
+
+function ConversationSidebar({ conversations, activeConversationId, onNew, onSelect, onDelete, onClose }) {
+  const sorted = [...conversations].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  return (
+    <aside className="conversation-sidebar" aria-label="聊天记录">
+      <div className="sidebar-brand">
+        <div className="brand-glyph"><Sparkles size={16} /></div>
+        <div><strong>Resume Protocol</strong><span>Career Agent</span></div>
+        <button type="button" onClick={onClose} className="sidebar-close" aria-label="关闭会话列表"><X size={18} /></button>
+      </div>
+      <button className="new-chat-button" type="button" onClick={onNew}>
+        <Plus size={17} />新对话
+      </button>
+      <div className="history-label"><span>聊天记录</span><span>{conversations.length}</span></div>
+      <nav className="conversation-history">
+        {sorted.map((conversation) => (
+          <div key={conversation.id} className={"history-row" + (conversation.id === activeConversationId ? " active" : "")}>
+            <button type="button" className="history-item" onClick={() => onSelect(conversation.id)}>
+              <MessageSquareText size={15} />
+              <span><strong>{conversation.title}</strong><small>{formatRelativeTime(conversation.updatedAt)}</small></span>
+            </button>
+            <button
+              type="button"
+              className="history-delete"
+              aria-label={"删除会话 " + conversation.title}
+              onClick={(event) => onDelete(event, conversation.id)}
+            ><Trash2 size={14} /></button>
+          </div>
+        ))}
+      </nav>
+      <div className="sidebar-foot">
+        <div><span className="status-dot" />本地保存</div>
+        <p>聊天与职业上下文仅保存在当前浏览器。</p>
+      </div>
+    </aside>
+  );
+}
+
+function ChatHeader({ conversation, onMenu, onNew }) {
+  const context = conversation.context;
+  const states = [
+    ["资料", Boolean(context.profile)],
+    ["目标", Boolean(context.selectedJob)],
+    ["岗位版", Boolean(context.variant)]
+  ];
+  return (
+    <header className="chat-header">
+      <button className="mobile-menu-button" type="button" onClick={onMenu} aria-label="打开聊天记录"><Menu size={19} /></button>
+      <div className="header-title">
+        <span>Career Agent</span>
+        <ChevronDown size={14} />
+      </div>
+      <div className="context-state" aria-label="当前上下文状态">
+        {states.map(([label, ready]) => (
+          <span className={ready ? "ready" : ""} key={label}>
+            {ready ? <CheckCircle2 size={13} /> : <Circle size={13} />}{label}
+          </span>
+        ))}
+      </div>
+      <button className="header-new-chat" type="button" onClick={onNew}><Plus size={16} /><span>新对话</span></button>
+    </header>
+  );
+}
+
+function WelcomeState({ onPrompt, videoFailed, onVideoError }) {
+  return (
+    <section className={"welcome-state" + (videoFailed ? " video-failed" : "")}>
       <video
-        className="gateway-video"
-        src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260402_134434_5de46cb4-38e7-42a6-a8bc-6e62b2fd6c7b.mp4"
+        className="welcome-video"
+        src={VIDEO_URL}
         autoPlay
         loop
         muted
@@ -139,1380 +491,282 @@ function AgentGateway({ context, selectedJob, onCommand }) {
         preload="metadata"
         aria-hidden="true"
         onCanPlay={(event) => event.currentTarget.play().catch(() => {})}
-        onError={() => setVideoFailed(true)}
+        onError={onVideoError}
       />
-      <div className="gateway-scrim" aria-hidden="true" />
-      <div className="gateway-topline"><span>YOUR CAREER CONTEXT, ONE CONVERSATION AWAY</span><span>LOCAL-FIRST · FACT-BOUND</span></div>
-      <div className="gateway-copy">
-        <p>RESUME PROTOCOL / AGENT 01</p>
-        <AnimatedText as="h1" text="一次对话，启动整个求职流程" />
-        <AnimatedText as="div" className="gateway-subtitle" text="从职业资料、目标岗位到定制简历和面试复习，让每一步共享同一份真实上下文。" />
-      </div>
-      <form className="agent-composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        <div className="agent-transcript" aria-live="polite">
-          {messages.slice(-3).map((message, index) => (
-            <p key={`${message.role}-${index}-${message.text}`} className={`${message.role} ${message.tone || ""}`}>
-              <span>{message.role === "agent" ? "PROTOCOL" : "YOU"}</span>{message.text}
-            </p>
-          ))}
-          {submitting ? <p className="agent thinking"><span>PROTOCOL</span>正在判断下一步<span className="thinking-dots">...</span></p> : null}
+      <div className="welcome-wash" aria-hidden="true" />
+      <div className="welcome-content">
+        <div className="agent-mark"><Bot size={22} /></div>
+        <p className="welcome-kicker">RESUME PROTOCOL / AGENT 01</p>
+        <h1>今天想推进哪一步？</h1>
+        <p className="welcome-copy">把简历、JD 或目标直接发过来。Agent 会记住当前对话里的资料，并调用对应能力完成任务。</p>
+        <div className="quick-prompts">
+          {QUICK_PROMPTS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button key={item.label} type="button" onClick={() => onPrompt(item.prompt)}>
+                <Icon size={18} />
+                <span><strong>{item.label}</strong><small>{item.description}</small></span>
+              </button>
+            );
+          })}
         </div>
-        <div className="composer-input-row">
-          <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                submit();
-              }
-            }}
-            placeholder="告诉我目标，例如：帮我按这个前端 JD 优化简历…"
-            aria-label="向求职 Agent 描述目标"
-            rows={2}
-          />
-          <button className="composer-send" type="submit" disabled={submitting} aria-label="发送给求职 Agent">
-            {submitting ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
+      </div>
+    </section>
+  );
+}
+
+function MessageStream({ conversation, pending, onSelectJob, endRef }) {
+  return (
+    <section className="message-scroll" aria-label="对话内容">
+      <div className="message-stream" role="log" aria-live="polite">
+        {conversation.messages.map((message) => (
+          <ChatMessage key={message.id} message={message} context={conversation.context} onSelectJob={onSelectJob} />
+        ))}
+        {pending ? (
+          <div className="message-row assistant pending-message">
+            <AgentAvatar />
+            <div className="message-body"><LoaderCircle className="spin" size={17} /><span>{pending.label}</span></div>
+          </div>
+        ) : null}
+        <div ref={endRef} />
+      </div>
+    </section>
+  );
+}
+
+function ChatMessage({ message, context, onSelectJob }) {
+  if (message.role === "user") {
+    return (
+      <div className="message-row user">
+        <div className="user-bubble">
+          {message.kind === "attachment" ? <FileText size={16} /> : null}
+          <p>{message.content}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={"message-row assistant " + (message.tone || "")}>
+      <AgentAvatar />
+      <div className="message-body">
+        <p>{message.content}</p>
+        <MessageResult message={message} context={context} onSelectJob={onSelectJob} />
+      </div>
+    </div>
+  );
+}
+
+function AgentAvatar() {
+  return <div className="agent-avatar"><Bot size={16} /></div>;
+}
+
+function MessageResult({ message, context, onSelectJob }) {
+  const data = message.data || {};
+  if (message.kind === "diagnosis") return <DiagnosisResult data={data} />;
+  if (message.kind === "jobs") return <JobsResult jobs={data.jobs || []} selectedJob={context.selectedJob} onSelect={onSelectJob} />;
+  if (message.kind === "resume") return <ResumeResult variant={data.variant} />;
+  if (message.kind === "interview") return <InterviewResult plan={data.plan} />;
+  if (message.kind === "target") return <TargetResult job={data.job} />;
+  if (message.kind === "error") return <div className="inline-error">上下文已保留，可以重新发送这条指令。</div>;
+  return null;
+}
+
+function DiagnosisResult({ data }) {
+  return (
+    <div className="result-card diagnosis-card">
+      <header><span>资料诊断</span><strong>{data.completeness || 0}<small>%</small></strong></header>
+      <ResultList title="已有优势" items={data.strengths} positive />
+      <ResultList title="优先补齐" items={data.gaps} />
+    </div>
+  );
+}
+
+function JobsResult({ jobs, selectedJob, onSelect }) {
+  if (!jobs.length) return null;
+  return (
+    <div className="result-card jobs-card">
+      <header><span>岗位候选</span><small>选择后写入当前对话上下文</small></header>
+      <div className="job-list">
+        {jobs.map((job) => {
+          const selected = selectedJob?.id === job.id;
+          return (
+            <button key={job.id} type="button" className={selected ? "selected" : ""} onClick={() => onSelect(job)}>
+              <span className="job-icon"><BriefcaseBusiness size={16} /></span>
+              <span className="job-main">
+                <strong>{job.title}</strong>
+                <small>{job.company || "招聘团队"} · {job.location || "地点待确认"}</small>
+              </span>
+              <span className="job-score">{job.opportunityScore || job.matchScore || "--"}</span>
+              <span className="job-action">{selected ? <><Check size={14} />已选择</> : "选择"}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ResumeResult({ variant }) {
+  if (!variant) return null;
+  return (
+    <div className="result-card resume-card">
+      <header>
+        <div><span>岗位版简历</span><h3>{variant.title}</h3></div>
+        <strong>{variant.fitScore}<small>/100</small></strong>
+      </header>
+      <p className="resume-summary">{variant.summary}</p>
+      <div className="skill-row">{(variant.skills || []).slice(0, 8).map((skill) => <span key={skill}>{skill}</span>)}</div>
+      <div className="project-output">
+        {(variant.projects || []).slice(0, 3).map((project, index) => (
+          <div key={project}><span>0{index + 1}</span><p>{project}</p></div>
+        ))}
+      </div>
+      <footer><WandSparkles size={14} />已同步生成面试追问</footer>
+    </div>
+  );
+}
+
+function InterviewResult({ plan }) {
+  if (!plan) return null;
+  return (
+    <div className="result-card interview-card">
+      <header><span>面试准备</span><small>{plan.roleLabel}</small></header>
+      <div className="topic-row">
+        {(plan.technicalTopics || []).slice(0, 4).map((topic) => (
+          <span key={topic.id}><b>{topic.priority}</b>{topic.title}</span>
+        ))}
+      </div>
+      <div className="interview-columns">
+        <section>
+          <h3>项目追问</h3>
+          {(plan.resumeDefense || []).slice(0, 4).map((question) => <p key={question}>{question}</p>)}
+        </section>
+        <section>
+          <h3>七天节奏</h3>
+          {(plan.schedule || []).slice(0, 7).map((item) => (
+            <p key={item.day}><b>{item.day}</b><span>{item.title}</span></p>
+          ))}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function TargetResult({ job }) {
+  if (!job) return null;
+  return (
+    <div className="target-card">
+      <span><BriefcaseBusiness size={15} />当前目标</span>
+      <strong>{job.company} · {job.title}</strong>
+    </div>
+  );
+}
+
+function ResultList({ title, items = [], positive = false }) {
+  const normalizedItems = normalizeResultItems(items);
+  if (!normalizedItems.length) return null;
+  return (
+    <section className={"result-list" + (positive ? " positive" : "")}>
+      <h3>{title}</h3>
+      {normalizedItems.slice(0, 4).map((item) => <p key={item}><span>{positive ? <Check size={12} /> : "→"}</span>{item}</p>)}
+    </section>
+  );
+}
+
+function ChatComposer({ draft, onDraft, onSubmit, onAttach, disabled }) {
+  return (
+    <div className="composer-dock">
+      <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
+        <textarea
+          value={draft}
+          onChange={(event) => onDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              onSubmit();
+            }
+          }}
+          placeholder="给 Career Agent 发消息"
+          aria-label="给 Career Agent 发消息"
+          rows={1}
+          disabled={disabled}
+        />
+        <div className="composer-actions">
+          <button type="button" onClick={onAttach} aria-label="上传简历"><Paperclip size={18} /></button>
+          <span>支持 PDF、Word、TXT</span>
+          <button className="send-button" type="submit" disabled={disabled || !draft.trim()} aria-label="发送">
+            {disabled ? <LoaderCircle className="spin" size={18} /> : <Send size={18} />}
           </button>
         </div>
-        <div className="composer-tools">
-          <div className="quick-action-scroll scrollbar-hide">
-            {quickActions.map((item) => (
-              <button key={item.label} type="button" onClick={() => submit(item.prompt)} disabled={submitting}>{item.icon}{item.label}</button>
-            ))}
-          </div>
-        </div>
-        <AgentContextRail context={context} selectedJob={selectedJob} />
       </form>
-      <a className="gateway-scroll" href="#promise"><span>Explore the protocol</span><ArrowDown size={18} /></a>
-      <div className="gateway-bottom-fade" aria-hidden="true" />
-    </section>
-  );
-}
-
-function AnimatedText({ as: Tag = "p", text, className = "" }) {
-  const segments = typeof Intl !== "undefined" && Intl.Segmenter
-    ? [...new Intl.Segmenter("zh-CN", { granularity: "word" }).segment(text)].map((item) => item.segment)
-    : text.split(/(\s+)/);
-  return (
-    <Tag className={`animated-text ${className}`.trim()} aria-label={text}>
-      {segments.map((segment, index) => /^\s+$/.test(segment)
-        ? segment
-        : <span aria-hidden="true" key={`${segment}-${index}`} style={{ "--word-index": index }}>{segment}</span>)}
-    </Tag>
-  );
-}
-
-function AgentContextRail({ context, selectedJob }) {
-  const states = [
-    ["职业资料", context.hasProfile],
-    ["目标 JD", context.hasJob],
-    ["岗位版", context.hasVariant],
-    ["面试计划", context.hasVariant]
-  ];
-  return (
-    <div className="agent-context-rail">
-      <span>{selectedJob ? `${selectedJob.company} · ${selectedJob.title}` : "CONTEXT READINESS"}</span>
-      <div>{states.map(([label, ready]) => <b key={label} className={ready ? "ready" : ""}><i />{label}</b>)}</div>
+      <p>Agent 只基于当前对话中的真实资料生成内容，请在投递前核对事实。</p>
     </div>
   );
 }
 
-function PromiseSection() {
-  return (
-    <section className="promise-section" id="promise">
-      <div><span>ONE ENTRY / FOUR WORKFLOWS</span><AnimatedText as="h2" text="不是多一个聊天框，是一个知道下一步的求职 Agent" /></div>
-      <AnimatedText as="p" text="它读取当前资料是否完整、是否选定目标岗位、是否已经生成岗位版，再决定直接执行还是先补齐前置条件。对话降低门槛，结构化工作台保留深度。" />
-      <div className="promise-orbit" aria-hidden="true"><Zap size={22} /><span>CONTEXT → ACTION</span></div>
-    </section>
-  );
+async function api(path, options = {}) {
+  const response = await fetch(API_BASE + path, options);
+  const data = await response.json();
+  if (!response.ok || data.ok === false) throw new Error(data.error || "HTTP " + response.status);
+  return data;
 }
 
-function SiteFooter() {
-  return (
-    <footer className="site-footer">
-      <div><span>RESUME PROTOCOL</span><strong>MAKE EVERY LINE<br />DEFENSIBLE.</strong></div>
-      <div><span>OUTPUT</span><a href="#resume">A4 Resume</a><a href="#interview">Interview Map</a><a href="#jobs">Job Radar</a></div>
-      <div><span>PRINCIPLE</span><p>事实先于包装。证据先于关键词。每一条都准备好被追问。</p></div>
-      <small>© 2026 · LOCAL-FIRST CAREER TOOL</small>
-    </footer>
-  );
+function looksLikeResumeMaterial(value) {
+  const text = String(value || "");
+  return text.length > 80 && /教育经历|教育背景|项目经历|工作经历|实习经历|技能|GitHub|邮箱|电话/i.test(text);
 }
 
-function App() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [rawMaterial, setRawMaterial] = useState(SAMPLE_MATERIAL);
-  const [fileName, setFileName] = useState("");
-  const [profileResult, setProfileResult] = useState(null);
-  const [intakeResult, setIntakeResult] = useState(null);
-  const [supplements, setSupplements] = useState({});
-  const [formalResume, setFormalResume] = useState(null);
-  const [avatar, setAvatar] = useState("");
-  const [role, setRole] = useState("ai");
-  const [template, setTemplate] = useState("aiResearch");
-  const [templateLibrary, setTemplateLibrary] = useState([]);
-  const [jd, setJd] = useState(DEFAULT_JD);
-  const [jobType, setJobType] = useState("campus");
-  const [jobQuery, setJobQuery] = useState("AI Agent");
-  const [jobSources, setJobSources] = useState([]);
-  const [selectedSourceIds, setSelectedSourceIds] = useState(DEFAULT_SOURCE_IDS);
-  const [sourcesDirty, setSourcesDirty] = useState(false);
-  const [selectedJob, setSelectedJob] = useState(null);
-  const [jobUrl, setJobUrl] = useState("");
-  const [radarOpen, setRadarOpen] = useState(false);
-  const [variant, setVariant] = useState(null);
-  const [jobs, setJobs] = useState([]);
-  const [queue, setQueue] = useState([]);
-  const [bossUrl, setBossUrl] = useState("https://www.zhipin.com/web/geek/job?query=AI%20Agent");
-  const [bossStatus, setBossStatus] = useState({ connected: false, logs: [] });
-  const [events, setEvents] = useState([]);
-  const [busy, setBusy] = useState("");
-  const [autoArmed, setAutoArmed] = useState(false);
-  const [dryRun, setDryRun] = useState(true);
-  const [blacklist, setBlacklist] = useState("外包,培训,保险,销售");
-
-  const profile = profileResult?.profile;
-  const diagnosis = profileResult?.diagnosis;
-  const roleScores = profileResult?.roleScores || {};
-  const canGenerate = Boolean(profile);
-  const selectedRole = ROLE_CARDS.find((item) => item.id === role);
-  const selectedTemplate = templateLibrary.find((item) => item.id === template) || TEMPLATE_CARDS.find((item) => item.id === template);
-  const sortedJobs = useMemo(() => [...jobs].sort((a, b) => (b.opportunityScore || b.matchScore || 0) - (a.opportunityScore || a.matchScore || 0)), [jobs]);
-  const radarSummary = useMemo(() => buildRadarSummary(jobSources, sortedJobs), [jobSources, sortedJobs]);
-  const activeRadarJob = selectedJob || sortedJobs[0] || null;
-  const completeness = intakeResult?.completeness;
-
-  useEffect(() => {
-    loadTemplateLibrary();
-    loadJobLibrary("campus", "AI Agent");
-    refreshLiveJobs();
-  }, []);
-
-  async function api(path, options = {}) {
-    const response = await fetch(`${API_BASE}${path}`, options);
-    const data = await response.json();
-    if (!response.ok || data.ok === false) throw new Error(data.error || `HTTP ${response.status}`);
-    return data;
-  }
-
-  async function runAction(name, action) {
-    setBusy(name);
-    try {
-      const result = await action();
-      if (result.events) setEvents(result.events);
-      return result;
-    } catch (error) {
-      setEvents((current) => [{ type: "error", message: error.message, at: new Date().toISOString() }, ...current]);
-      return null;
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function loadTemplateLibrary() {
-    const result = await api("/api/templates");
-    setTemplateLibrary(result.templates || []);
-    if (result.templates?.[0] && !result.templates.some((item) => item.id === template)) {
-      setTemplate(result.templates[0].id);
-    }
-  }
-
-  async function loadJobLibrary(nextType = jobType, nextQuery = jobQuery) {
-    const params = new URLSearchParams({ type: nextType, query: nextQuery || "" });
-    const result = await api(`/api/jobs/library?${params.toString()}`);
-    setJobs(result.jobs || []);
-    setJobSources(result.sources || []);
-  }
-
-  async function parseMaterial() {
-    const result = await runAction("parse", () =>
-      api("/api/intake/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: rawMaterial, supplements, role, job: selectedJob })
-      })
-    );
-    if (result) {
-      setProfileResult(result);
-      setIntakeResult(result);
-    }
-    return result;
-  }
-
-  async function uploadFile(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    const form = new FormData();
-    form.append("file", file);
-    const result = await runAction("upload", () => api("/api/profile/upload", { method: "POST", body: form }));
-    if (result) {
-      setProfileResult(result);
-      setIntakeResult(null);
-      setRawMaterial(result.normalizedText || rawMaterial);
-    }
-  }
-
-  function uploadAvatar(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setAvatar(String(reader.result || ""));
-    reader.readAsDataURL(file);
-  }
-
-  async function formalizeResume() {
-    const result = await runAction("formalize", () =>
-      api("/api/resume/formalize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: rawMaterial, extraText: Object.values(supplements).join("\n\n"), profile, role, template, jd, job: selectedJob })
-      })
-    );
-    if (result?.resume) {
-      setFormalResume(result.resume);
-      if (!profileResult && result.profile) {
-        setProfileResult({ profile: result.profile, diagnosis: result.diagnosis, roleScores: {} });
-      }
-    }
-  }
-
-  async function generateResume() {
-    const result = await runAction("generate", () =>
-      api("/api/resume/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile, role, template, jd: buildSelectedJd() })
-      })
-    );
-    if (result?.variant) setVariant(result.variant);
-    return result;
-  }
-
-  async function loadDemoJobs() {
-    const result = await runAction("jobs", () =>
-      api("/api/jobs/demo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile, role })
-      })
-    );
-    if (result?.jobs) setJobs(result.jobs);
-  }
-
-  async function refreshLiveJobs() {
-    if (!selectedSourceIds.length) {
-      setEvents((current) => [{ type: "warning", message: "请至少启用一个情报源后再同步。", at: new Date().toISOString() }, ...current]);
-      return;
-    }
-    const result = await runAction("jobs-live", () =>
-      api("/api/jobs/live", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile, type: jobType, query: jobQuery, sourceIds: selectedSourceIds })
-      })
-    );
-    if (result?.jobs) {
-      setJobs(result.jobs);
-      setJobSources(result.sources || jobSources);
-      setSourcesDirty(false);
-    }
-  }
-
-  async function importJobUrl() {
-    const result = await runAction("job-import", () =>
-      api("/api/jobs/import-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: jobUrl, profile, role })
-      })
-    );
-    if (result?.job) {
-      chooseJob(result.job);
-      setJobs(result.jobs || [result.job, ...jobs]);
-    }
-  }
-
-  function chooseJob(job) {
-    setSelectedJob(job);
-    setRole(job.role || role);
-    const nextJd = [job.description, ...(job.requirements || [])].filter(Boolean).join("\n");
-    setJd(nextJd || DEFAULT_JD);
-  }
-
-  function toggleSource(sourceId) {
-    setSelectedSourceIds((current) =>
-      current.includes(sourceId) ? current.filter((item) => item !== sourceId) : [...current, sourceId]
-    );
-    setSourcesDirty(true);
-  }
-
-  function selectAllSources() {
-    const all = jobSources.length ? jobSources.map((source) => source.id) : DEFAULT_SOURCE_IDS;
-    setSelectedSourceIds(all);
-    setSourcesDirty(true);
-  }
-
-  function clearSources() {
-    setSelectedSourceIds([]);
-    setSourcesDirty(true);
-  }
-
-  async function startBoss() {
-    const result = await runAction("boss-start", () =>
-      api("/api/boss/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: bossUrl })
-      })
-    );
-    if (result) setBossStatus(result);
-  }
-
-  async function scrapeBoss() {
-    const result = await runAction("boss-scrape", () =>
-      api("/api/boss/scrape", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile, role, max: 20 })
-      })
-    );
-    if (result?.jobs) {
-      setJobs(result.jobs);
-      setBossStatus(result.status);
-    }
-  }
-
-  async function addToQueue(job) {
-    const result = await runAction("queue", () =>
-      api("/api/queue/add", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ job, role, variantId: variant?.id })
-      })
-    );
-    if (result?.queue) setQueue(result.queue);
-  }
-
-  async function runBossApply() {
-    const selectedJobs = queue.map((item) => item.job);
-    const result = await runAction("boss-apply", () =>
-      api("/api/boss/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jobs: selectedJobs,
-          greeting: variant?.greeting,
-          dryRun,
-          limit: 5,
-          delayMs: 10000,
-          blacklist: blacklist.split(",").map((item) => item.trim()).filter(Boolean)
-        })
-      })
-    );
-    if (result?.status) setBossStatus(result.status);
-  }
-
-  function exportVariant() {
-    const payload = { profile, variant, jobs, queue, exportedAt: new Date().toISOString() };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `resume-protocol-${role}-${template}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function updateFormalResume(path, value) {
-    setFormalResume((current) => {
-      if (!current) return current;
-      if (path.startsWith("contact.")) {
-        const key = path.split(".")[1];
-        return { ...current, contact: { ...current.contact, [key]: value } };
-      }
-      if (path === "skills") {
-        return { ...current, skills: splitSkills(value) };
-      }
-      if (["education", "projects", "experience", "awards"].includes(path)) {
-        return { ...current, [path]: splitRows(value) };
-      }
-      return { ...current, [path]: value };
-    });
-  }
-
-  function updateSupplement(id, value) {
-    setSupplements((current) => ({ ...current, [id]: value }));
-  }
-
-  function buildSelectedJd() {
-    return [jd, selectedJob?.description, ...(selectedJob?.requirements || [])].filter(Boolean).join("\n");
-  }
-
-  function exportFormalResume() {
-    const payload = { resume: formalResume, avatar, exportedAt: new Date().toISOString() };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `formal-resume-${role}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function navigateTo(target) {
-    window.requestAnimationFrame(() => {
-      document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }
-
-  async function runAgentCommand(input) {
-    const plan = planAgentAction(input, {
-      hasMaterial: Boolean(rawMaterial.trim()),
-      hasProfile: Boolean(profile),
-      hasJob: Boolean(selectedJob),
-      hasVariant: Boolean(variant)
-    });
-    if (plan.action === "analyze") {
-      navigateTo(plan.target);
-      const result = await parseMaterial();
-      return result
-        ? { ...plan, message: `资料分析完成：当前完整度 ${result.completeness?.completeness ?? result.diagnosis?.completeness ?? 0}%。我已把缺口和优势放在职业资料区。` }
-        : { ...plan, tone: "warning", message: "资料分析没有完成，请查看页面中的错误提示后重试。" };
-    }
-    if (plan.action === "open-jobs") {
-      setRadarOpen(true);
-      navigateTo("jobs");
-      return plan;
-    }
-    if (plan.action === "generate-resume") {
-      const result = await generateResume();
-      navigateTo("interview");
-      return result?.variant
-        ? { ...plan, message: `岗位版已生成：匹配度 ${result.variant.fitScore}/100。项目证据与面试追问已经同步进入作战室。` }
-        : { ...plan, tone: "warning", message: "岗位版没有生成成功，请检查目标 JD 和页面错误提示后重试。" };
-    }
-    navigateTo(plan.target);
-    return plan;
-  }
-
-  return (
-    <main className="product-shell">
-      <div className="grain-layer" aria-hidden="true" />
-      <SiteNav menuOpen={menuOpen} onMenuToggle={() => setMenuOpen((current) => !current)} onNavigate={() => setMenuOpen(false)} />
-      <AgentGateway
-        context={{ hasProfile: Boolean(profile), hasJob: Boolean(selectedJob), hasVariant: Boolean(variant) }}
-        selectedJob={selectedJob}
-        onCommand={runAgentCommand}
-      />
-      <PromiseSection />
-      <section className="protocol-stage" id="workflow">
-      <aside className="side-rail">
-        <div className="system-lines">
-          <span>PROTOCOL // 01—08</span>
-          <span>MODE // EVIDENCE_FIRST</span>
-          <span>OUTPUT // RESUME + INTERVIEW</span>
-        </div>
-        <h1>BUILD<br />YOUR<br />CASE.</h1>
-        <p>每一条简历，都应该是一段你能在面试里讲清楚的证据。</p>
-        <StepList profile={profile} completeness={completeness} selectedJob={selectedJob} selectedTemplate={selectedTemplate} formalResume={formalResume} variant={variant} jobs={jobs} queue={queue} bossStatus={bossStatus} />
-      </aside>
-
-      <section className="main-workspace">
-        <header className="workspace-header">
-          <div>
-            <span className="tag">CORE FLOW // 正式简历</span>
-            <h2>资料采集 → 缺口追问 → 岗位情报 → 模板生成</h2>
-          </div>
-          <div className="header-metrics">
-            <Metric label="PROFILE" value={profile ? `${diagnosis?.completeness || 0}%` : "WAIT"} />
-            <Metric label="ROLE" value={selectedRole?.label || "AI"} />
-            <Metric label="READY" value={completeness ? `${completeness.completeness}%` : "WAIT"} />
-          </div>
-        </header>
-
-        <section className="pipeline-grid">
-          <Panel id="materials" title="01 / 原始材料收件箱" icon={<Upload size={18} />}>
-            <div className="upload-row">
-              <label className="file-pick">
-                <input type="file" accept=".txt,.md,.json,.pdf,.docx" onChange={uploadFile} />
-                <Upload size={16} />
-                上传 PDF / DOCX / TXT
-              </label>
-              <label className="file-pick">
-                <input type="file" accept="image/*" onChange={uploadAvatar} />
-                <Camera size={16} />
-                上传头像
-              </label>
-              <span>{fileName || "也可以直接粘贴无格式简历、项目 README、实习碎片"}</span>
-            </div>
-            <textarea
-              className="material-input"
-              value={rawMaterial}
-              onChange={(event) => setRawMaterial(event.target.value)}
-              aria-label="原始个人材料"
-            />
-            <button className="primary-action" type="button" onClick={parseMaterial} disabled={busy === "parse"}>
-              {busy === "parse" ? <Loader2 className="spin" size={17} /> : <FileSearch size={17} />}
-              分析资料完整度
-            </button>
-          </Panel>
-
-          <Panel title="02 / 画像、缺口与优劣势" icon={<Database size={18} />}>
-            {!profile ? (
-              <EmptyState text="先解析材料。系统会自动抽取教育、技能、项目、实习、指标和联系方式。" />
-            ) : (
-              <>
-                <ProfileDiagnosis profile={profile} diagnosis={diagnosis} roleScores={roleScores} />
-                <IntakeChecklist completeness={completeness} supplements={supplements} onSupplement={updateSupplement} onAnalyze={parseMaterial} busy={busy === "parse"} />
-              </>
-            )}
-          </Panel>
-
-          <Panel id="jobs" title="03 / 岗位雷达" icon={<Target size={18} />} wide>
-            <RadarSummaryCard
-              summary={radarSummary}
-              job={activeRadarJob}
-              selectedCount={selectedSourceIds.length}
-              sourceCount={jobSources.length}
-              dirty={sourcesDirty}
-              busy={busy === "jobs-live"}
-              onOpen={() => setRadarOpen(true)}
-              onSync={refreshLiveJobs}
-            />
-            {radarOpen ? (
-              <RadarModal
-                role={role}
-                jobType={jobType}
-                jobQuery={jobQuery}
-                sources={jobSources}
-                selectedSourceIds={selectedSourceIds}
-                sourcesDirty={sourcesDirty}
-                summary={radarSummary}
-                jobs={sortedJobs}
-                activeJob={activeRadarJob}
-                jd={jd}
-                jobUrl={jobUrl}
-                busy={busy}
-                onClose={() => setRadarOpen(false)}
-                onRoleChange={(nextRole, title) => { setRole(nextRole); setJobQuery(title); loadJobLibrary(jobType, title); }}
-                onTypeChange={(nextType) => { setJobType(nextType); loadJobLibrary(nextType, jobQuery); }}
-                onQueryChange={setJobQuery}
-                onLoadLibrary={() => loadJobLibrary(jobType, jobQuery)}
-                onSync={refreshLiveJobs}
-                onToggleSource={toggleSource}
-                onSelectAllSources={selectAllSources}
-                onClearSources={clearSources}
-                onQueue={addToQueue}
-                onSelectJob={chooseJob}
-                onJdChange={setJd}
-                onJobUrlChange={setJobUrl}
-                onImportJob={importJobUrl}
-              />
-            ) : null}
-          </Panel>
-
-          <Panel title="04 / 简历模板库" icon={<FileText size={18} />} wide>
-            <TemplateLibrary templates={templateLibrary} selected={template} onSelect={setTemplate} />
-          </Panel>
-
-          <Panel id="resume" title="05 / 正式一页简历预览" icon={<FileText size={18} />} wide className="resume-print-panel">
-            {!formalResume ? (
-              <EmptyState text={selectedJob && selectedTemplate ? "点击“AI 整合成正式一页简历”后，这里会生成带头像的一页正式简历。" : "请先完成信息分析，并选择目标岗位和简历模板，再生成正式简历。"} />
-            ) : (
-              <div className="formal-resume-workbench">
-                <FormalResumeEditor resume={formalResume} onChange={updateFormalResume} />
-                <FormalResumePreview resume={formalResume} avatar={avatar} template={selectedTemplate} />
-              </div>
-            )}
-            <div className="action-row">
-              <button type="button" onClick={formalizeResume} disabled={!profile || !selectedJob || !selectedTemplate || busy === "formalize"}>{busy === "formalize" ? <Loader2 className="spin" size={16} /> : <Wand2 size={16} />}生成正式简历</button>
-              <button type="button" onClick={exportFormalResume} disabled={!formalResume}><Save size={16} />导出正式简历 JSON</button>
-              <button type="button" onClick={() => window.print()} disabled={!formalResume}><Printer size={16} />导出 PDF / 打印</button>
-            </div>
-          </Panel>
-
-          <Panel id="interview" title="06 / 岗位证据与面试作战室" icon={<Target size={18} />} wide>
-            {!variant ? <EmptyState text="生成后会显示项目入选理由、岗位化 bullet、事实证据、项目追问和 7 天复习路线。" /> : <ResumeVariant variant={variant} />}
-            <div className="action-row">
-              <button className="primary-action compact-action" type="button" onClick={generateResume} disabled={!canGenerate || !selectedJob || busy === "generate"}>
-                {busy === "generate" ? <Loader2 className="spin" size={17} /> : <Wand2 size={17} />}
-                生成岗位版素材
-              </button>
-              <button type="button" onClick={exportVariant} disabled={!variant}><Download size={16} />导出 JSON</button>
-              <button type="button" onClick={() => window.print()} disabled={!variant}><MonitorUp size={16} />打印 / PDF</button>
-            </div>
-          </Panel>
-
-          <Panel title="07 / Boss 岗位雷达" icon={<Radar size={18} />} wide>
-            <div className="boss-bar">
-              <input value={bossUrl} onChange={(event) => setBossUrl(event.target.value)} aria-label="Boss 搜索 URL" />
-              <button type="button" onClick={startBoss} disabled={busy === "boss-start"}><Bot size={16} />启动 Boss 浏览器</button>
-              <button type="button" onClick={scrapeBoss} disabled={busy === "boss-scrape"}><RefreshCw size={16} />抓取当前页岗位</button>
-              <button type="button" onClick={loadDemoJobs}><Sparkles size={16} />示例岗位</button>
-            </div>
-            <div className="boss-status">
-              <span className={bossStatus.connected ? "ok-dot" : "idle-dot"} />
-              {bossStatus.connected ? "Boss 浏览器已连接。请确保你已手动登录。" : "未连接。启动后会打开独立 Chrome 用户目录。"}
-            </div>
-            <JobList jobs={sortedJobs} onQueue={addToQueue} />
-          </Panel>
-
-          <Panel title="08 / 投递队列与自动执行" icon={<Send size={18} />} wide>
-            <div className="apply-controls">
-              <label><input type="checkbox" checked={dryRun} onChange={(event) => setDryRun(event.target.checked)} /> Dry-run 只演练不点击发送</label>
-              <label><input type="checkbox" checked={autoArmed} onChange={(event) => setAutoArmed(event.target.checked)} /> 我确认启用自动点击</label>
-              <input value={blacklist} onChange={(event) => setBlacklist(event.target.value)} aria-label="黑名单关键词" />
-              <button className="danger-action" type="button" onClick={runBossApply} disabled={!queue.length || (!dryRun && !autoArmed) || busy === "boss-apply"}>
-                <Play size={16} />
-                {dryRun ? "演练投递流程" : "开始自动投递"}
-              </button>
-            </div>
-            <QueueList queue={queue} />
-            <LogPanel events={events} bossStatus={bossStatus} />
-          </Panel>
-        </section>
-      </section>
-      </section>
-      <SiteFooter />
-    </main>
-  );
+function looksLikeJobDescription(value) {
+  const text = String(value || "");
+  return text.length > 100 && /岗位职责|岗位要求|职位描述|任职要求|工作内容|我们希望/i.test(text);
 }
 
-function splitRows(value) {
-  return String(value || "")
-    .split(/\n/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function splitSkills(value) {
-  return String(value || "")
-    .split(/\n|,|，/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function joinLines(value) {
-  return (value || []).join("\n");
-}
-
-function StepList({ profile, completeness, selectedJob, selectedTemplate, formalResume, variant, jobs, queue, bossStatus }) {
-  const steps = [
-    ["采集资料", Boolean(profile)],
-    ["缺口补充", Boolean(completeness && completeness.missing.length === 0)],
-    ["选择岗位", Boolean(selectedJob)],
-    ["选择模板", Boolean(selectedTemplate)],
-    ["正式简历", Boolean(formalResume)],
-    ["岗位素材", Boolean(variant)],
-    ["投递队列", queue.length > 0 || jobs.length > 0],
-    ["Boss 会话", bossStatus.connected]
-  ];
-  return (
-    <div className="step-list">
-      {steps.map(([label, done], index) => (
-        <div key={label} className={done ? "done" : ""}>
-          <span>{String(index + 1).padStart(2, "0")}</span>
-          <strong>{label}</strong>
-          {done ? <CheckCircle2 size={15} /> : <ArrowRight size={15} />}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Metric({ label, value }) {
-  return <div className="metric"><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function Panel({ id, title, icon, children, wide = false, className = "" }) {
-  return (
-    <section id={id} className={`${wide ? "panel wide" : "panel"} ${className}`}>
-      <div className="panel-head">{icon}<h3>{title}</h3></div>
-      {children}
-    </section>
-  );
-}
-
-function EmptyState({ text }) {
-  return <div className="empty-state"><AlertTriangle size={18} />{text}</div>;
-}
-
-function CardGrid({ children }) {
-  return <div className="card-grid">{children}</div>;
-}
-
-function SelectCard({ active, onClick, children }) {
-  return <button type="button" className={active ? "select-card active" : "select-card"} onClick={onClick}>{children}</button>;
-}
-
-function ProfileDiagnosis({ profile, diagnosis, roleScores }) {
-  return (
-    <div className="diagnosis">
-      <div className="profile-summary">
-        <strong>{profile.name}</strong>
-        <span>{profile.title}</span>
-        <small>联系方式：{profile.contact.email || profile.contact.phone || "缺失"}</small>
-      </div>
-      <div className="mini-tags">
-        {profile.skills.slice(0, 12).map((skill) => <span key={skill}>{skill}</span>)}
-      </div>
-      <div className="diagnosis-columns">
-        <div>
-          <h4>优势</h4>
-          {(diagnosis?.strengths || []).map((item) => <p key={item}><CheckCircle2 size={14} />{item}</p>)}
-        </div>
-        <div>
-          <h4>缺口提示</h4>
-          {(diagnosis?.gaps || []).map((item) => <p key={item}><AlertTriangle size={14} />{item}</p>)}
-        </div>
-      </div>
-      <div className="score-grid">
-        {Object.entries(roleScores).map(([key, item]) => <Metric key={key} label={key.toUpperCase()} value={item.score} />)}
-      </div>
-    </div>
-  );
-}
-
-function IntakeChecklist({ completeness, supplements, onSupplement, onAnalyze, busy }) {
-  if (!completeness) {
-    return <EmptyState text="点击“分析资料完整度”，系统会告诉你教育、实习、项目、证书等哪些信息还缺。" />;
-  }
-  return (
-    <div className="intake-checklist">
-      <div className="checklist-head">
-        <strong>资料完整度 {completeness.completeness}%</strong>
-        <span>{completeness.readyForResume ? "可以进入生成" : `还缺 ${completeness.missing.length} 项关键信息`}</span>
-      </div>
-      <div className="field-grid">
-        {completeness.fields.map((field) => (
-          <section key={field.id} className={field.complete ? "field-card complete" : "field-card missing"}>
-            <div>
-              <b>{field.label}</b>
-              {field.complete ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
-            </div>
-            <p>{field.prompt}</p>
-            {field.evidence ? <small>{field.evidence}</small> : null}
-            {!field.complete ? (
-              <textarea
-                value={supplements[field.id] || ""}
-                onChange={(event) => onSupplement(field.id, event.target.value)}
-                placeholder={field.prompt}
-              />
-            ) : null}
-          </section>
-        ))}
-      </div>
-      <button className="primary-action secondary-action" type="button" onClick={onAnalyze} disabled={busy}>
-        {busy ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
-        合并补充信息并重新分析
-      </button>
-    </div>
-  );
-}
-
-function TemplateLibrary({ templates, selected, onSelect }) {
-  const rows = templates.length ? templates : TEMPLATE_CARDS;
-  return (
-    <div className="template-library">
-      {rows.map((item) => (
-        <button key={item.id} type="button" className={selected === item.id ? "template-card active" : "template-card"} onClick={() => onSelect(item.id)}>
-          <TemplatePreview template={item} />
-          <div className="template-card-copy">
-            <span>{item.source || "Local template"}</span>
-            <strong>{item.label}</strong>
-            <p>{item.bestFor || item.hint}</p>
-            <small>{item.notes || "正式一页简历模板"}</small>
-          </div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function TemplatePreview({ template }) {
-  const accent = template.accent || "#2563eb";
-  const tone = template.density === "compact" ? "compact" : "medium";
-  return (
-    <div className={`template-preview ${tone}`} style={{ "--preview-accent": accent }}>
-      <div className="preview-top">
-        <span />
-        <span />
-      </div>
-      <div className="preview-head">
-        <b />
-        <small />
-      </div>
-      <div className="preview-body">
-        <i />
-        <i />
-        <i />
-      </div>
-      <div className="preview-footer">
-        <em />
-        <em />
-      </div>
-    </div>
-  );
-}
-
-function RadarSummaryCard({ summary, job, selectedCount, sourceCount, dirty, busy, onOpen, onSync }) {
-  const statusText = dirty ? "来源选择已变更" : summary.syncedSources ? "聚合源已同步" : "等待同步";
-  return (
-    <section className="radar-summary-card">
-      <div className="radar-summary-copy">
-        <span className={dirty ? "radar-status dirty" : "radar-status"}>{statusText}</span>
-        <h4>{job?.title || "选择目标岗位，系统会按机会优先排序"}</h4>
-        <p>{job ? `${job.company || "岗位来源"} · 机会分 ${job.opportunityScore || job.matchScore || 0} · ${job.location || job.city || "多城市"}` : "聚合源、岗位列表、匹配解释都会放进弹窗，主流程不再被长列表撑开。"}</p>
-      </div>
-      <div className="radar-summary-stats">
-        <Metric label="SOURCE" value={`${selectedCount}/${sourceCount || DEFAULT_SOURCE_IDS.length}`} />
-        <Metric label="JOB" value={summary.generatedJobs || 0} />
-        <Metric label="HIGH" value={summary.highOpportunityJobs || 0} />
-      </div>
-      <div className="radar-summary-actions">
-        <button className="radar-open-button" type="button" onClick={onOpen}><Radar size={16} />打开岗位雷达</button>
-        <button type="button" onClick={onSync} disabled={busy || !selectedCount}>
-          {busy ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-          同步已选源
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function RadarModal({
-  role,
-  jobType,
-  jobQuery,
-  sources,
-  selectedSourceIds,
-  sourcesDirty,
-  summary,
-  jobs,
-  activeJob,
-  jd,
-  jobUrl,
-  busy,
-  onClose,
-  onRoleChange,
-  onTypeChange,
-  onQueryChange,
-  onLoadLibrary,
-  onSync,
-  onToggleSource,
-  onSelectAllSources,
-  onClearSources,
-  onQueue,
-  onSelectJob,
-  onJdChange,
-  onJobUrlChange,
-  onImportJob
-}) {
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    function onKeyDown(event) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [onClose]);
-
-  return (
-    <div className="radar-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="radar-modal" role="dialog" aria-modal="true" aria-label="岗位雷达">
-        <header className="radar-modal-head">
-          <div>
-          <span className="tag">JOB RADAR // CAMPUS AGGREGATOR</span>
-            <h3>岗位雷达</h3>
-          </div>
-          <button type="button" className="icon-action" onClick={onClose} aria-label="关闭岗位雷达"><X size={18} /></button>
-        </header>
-
-        <div className="radar-modal-toolbar">
-          <div className="role-tabs compact-tabs">
-            {ROLE_CARDS.map((item) => (
-              <button key={item.id} className={role === item.id ? "radar-tab active" : "radar-tab"} onClick={() => onRoleChange(item.id, item.title)} type="button">
-                <strong>{item.label}</strong>
-                <span>{item.title}</span>
-              </button>
-            ))}
-          </div>
-          <div className="radar-search modal-search">
-            <div className="template-row">
-              {Object.entries(TYPE_LABELS).map(([key, label]) => (
-                <button key={key} className={jobType === key ? "chip active" : "chip"} onClick={() => onTypeChange(key)} type="button">
-                  {label}
-                </button>
-              ))}
-            </div>
-            <input value={jobQuery} onChange={(event) => onQueryChange(event.target.value)} aria-label="岗位关键词" />
-            <button type="button" onClick={onSync} disabled={busy === "jobs-live" || !selectedSourceIds.length}>
-              {busy === "jobs-live" ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-              同步已选源
-            </button>
-            <button type="button" onClick={onLoadLibrary}><FileSearch size={16} />岗位画像</button>
-          </div>
-          <SourcePicker
-            sources={sources}
-            selected={selectedSourceIds}
-            dirty={sourcesDirty}
-            onToggle={onToggleSource}
-            onSelectAll={onSelectAllSources}
-            onClear={onClearSources}
-          />
-        </div>
-
-        <RadarMetrics summary={summary} />
-        <div className="radar-modal-grid">
-          <OpportunityList jobs={jobs} onQueue={onQueue} onSelect={onSelectJob} selectedJobId={activeJob?.id} />
-          <JobInsight
-            job={activeJob}
-            jd={jd}
-            onJdChange={onJdChange}
-            jobUrl={jobUrl}
-            onJobUrlChange={onJobUrlChange}
-            onImport={onImportJob}
-            importDisabled={!jobUrl || busy === "job-import"}
-          />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function SourcePicker({ sources, selected, dirty, onToggle, onSelectAll, onClear }) {
-  if (!sources.length) return <EmptyState text="官方源列表加载中。" />;
-  const groups = sources.reduce((bucket, source) => {
-    const key = source.group || "官方源";
-    bucket[key] = bucket[key] || [];
-    bucket[key].push(source);
-    return bucket;
-  }, {});
-  return (
-    <details className="source-picker">
-      <summary>
-        <span>{dirty ? "来源已变更，待同步" : "情报源选择"}</span>
-        <strong>{selected.length}/{sources.length}</strong>
-      </summary>
-      <div className="source-picker-panel">
-        <div className="source-picker-actions">
-          <button type="button" onClick={onSelectAll}>全部启用</button>
-          <button type="button" onClick={onClear}>清空</button>
-        </div>
-        {Object.entries(groups).map(([group, rows]) => (
-          <section key={group} className="source-group">
-            <h4>{group}</h4>
-            <div className="source-grid">
-              {rows.map((source) => {
-                const enabled = selected.includes(source.id);
-                return (
-                  <button key={source.id} type="button" aria-pressed={enabled} className={enabled ? "source-row active" : "source-row"} onClick={() => onToggle(source.id)}>
-                    <span className={source.ok ? "status-dot ok" : source.ok === false ? "status-dot fail" : "status-dot idle"} />
-                    <b>{source.company}</b>
-                    <small>{enabled ? "启用" : "停用"}</small>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        ))}
-      </div>
-    </details>
-  );
-}
-
-function buildRadarSummary(sources = [], jobs = []) {
+function createJobFromDescription(description) {
+  const firstLine = description.split(/\n/).map((item) => item.trim()).find(Boolean) || "自定义岗位";
   return {
-    totalSources: sources.length,
-    syncedSources: sources.filter((source) => source.ok).length,
-    failedSources: sources.filter((source) => source.ok === false).length,
-    generatedJobs: jobs.length,
-    highOpportunityJobs: jobs.filter((job) => (job.opportunityScore || job.matchScore || 0) >= 85).length,
-    officialVerifiedJobs: jobs.filter((job) => job.applyUrl || job.sourceUrl).length
+    id: createId("custom-job"),
+    company: "自定义 JD",
+    title: firstLine.slice(0, 30),
+    role: inferRole(description),
+    location: "地点待确认",
+    description,
+    requirements: description.split(/\n/).map((item) => item.trim()).filter(Boolean).slice(0, 12),
+    matchScore: null
   };
 }
 
-function RadarMetrics({ summary }) {
-  const metrics = [
-    ["情报源", summary.totalSources || 0],
-    ["已同步", summary.syncedSources || 0],
-    ["高机会", summary.highOpportunityJobs || 0],
-    ["可投递", summary.officialVerifiedJobs || 0],
-    ["岗位卡", summary.generatedJobs || 0]
-  ];
-  return (
-    <div className="radar-metrics">
-      {metrics.map(([label, value]) => (
-        <div key={label}>
-          <span>{label}</span>
-          <strong>{value}</strong>
-        </div>
-      ))}
-    </div>
-  );
+function inferRole(input = "", job = null) {
+  if (job?.role) return job.role;
+  const text = String(input || "");
+  if (/前端|React|Vue|TypeScript|交互/.test(text)) return "frontend";
+  if (/后端|FastAPI|Django|Java|数据库|接口/.test(text)) return "backend";
+  if (/产品|需求|PRD|用户研究/.test(text)) return "product";
+  if (/运营|增长|内容|转化/.test(text)) return "ops";
+  return "ai";
 }
 
-function SourceRadar({ sources, selected, onToggle }) {
-  if (!sources.length) return <EmptyState text="还没有情报源状态。点击“同步已选源”后会展示聚合源状态。" />;
-  const groups = sources.reduce((bucket, source) => {
-    const key = source.group || "官方源";
-    bucket[key] = bucket[key] || [];
-    bucket[key].push(source);
-    return bucket;
-  }, {});
-  return (
-    <aside className="source-radar">
-      <div className="radar-column-head">
-        <strong>情报源雷达</strong>
-        <span>{selected.length}/{sources.length}</span>
-      </div>
-      {Object.entries(groups).map(([group, rows]) => (
-        <section key={group} className="source-group">
-          <h4>{group}</h4>
-          {rows.map((source) => (
-            <button key={source.id} type="button" className={selected.includes(source.id) ? "source-row active" : "source-row"} onClick={() => onToggle(source.id)}>
-              <span className={source.ok ? "status-dot ok" : source.ok === false ? "status-dot fail" : "status-dot idle"} />
-              <b>{source.company}</b>
-              <small>{source.syncStatus === "synced" ? "已同步" : source.syncStatus === "failed" ? "失败" : "待同步"}</small>
-            </button>
-          ))}
-        </section>
-      ))}
-    </aside>
-  );
+function inferJobType(input = "") {
+  if (/实习/.test(input)) return "internship";
+  if (/社招|社会招聘/.test(input)) return "social";
+  return "campus";
 }
 
-function OpportunityList({ jobs, onQueue, onSelect, selectedJobId }) {
-  if (!jobs.length) return <EmptyState text="还没有岗位卡。同步聚合源后，会按机会分自动排序。" />;
-  return (
-    <section className="opportunity-list">
-      <div className="radar-column-head">
-        <strong>机会优先岗位</strong>
-        <span>{jobs.length} 条</span>
-      </div>
-      {jobs.slice(0, 36).map((job) => (
-        <article key={job.id || job.url} className={selectedJobId === job.id ? "opportunity-card active" : "opportunity-card"}>
-          <button type="button" className="opportunity-main" onClick={() => onSelect(job)}>
-            <span className="opportunity-company">{job.company || "未知公司"} · {TYPE_LABELS[job.type] || job.type || "岗位"}</span>
-            <strong>{job.title}</strong>
-            <p>{job.location || job.city || "多城市"} · {job.source === "github-job-source" ? "GitHub源" : job.source === "campus-aggregator" ? "聚合源" : job.sourceStatus === "reachable" ? "官方源可达" : "来源待确认"}</p>
-            <div className="opportunity-bars">
-              {Object.entries(job.opportunityBreakdown || {}).slice(0, 5).map(([key, value]) => (
-                <span key={key} style={{ "--bar": `${Math.max(8, Math.min(100, value || 0))}%` }}>
-                  <b>{breakdownLabel(key)}</b>
-                  <i />
-                </span>
-              ))}
-            </div>
-          </button>
-          <div className="opportunity-score">
-            <b>{job.opportunityScore || job.matchScore || 0}</b>
-            <button type="button" onClick={() => onQueue(job)}><Plus size={14} />入队</button>
-          </div>
-        </article>
-      ))}
-    </section>
-  );
+function formatRelativeTime(value) {
+  const time = new Date(value).getTime();
+  const diff = Math.max(0, Date.now() - time);
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return Math.floor(diff / 60_000) + " 分钟前";
+  if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + " 小时前";
+  return new Date(value).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
-function JobInsight({ job, jd, onJdChange, jobUrl, onJobUrlChange, onImport, importDisabled }) {
-  if (!job) return <EmptyState text="选择一个岗位后，这里会展示 JD 摘要、匹配证据、缺口关键词和简历建议。" />;
-  return (
-    <aside className="job-insight">
-      <div className="radar-column-head">
-        <strong>匹配解释</strong>
-        <span>{job.opportunityScore || job.matchScore || 0}</span>
-      </div>
-      <header className="insight-title">
-        <span>{job.company || "官方源"} · {job.sourceGroup || "岗位来源"}</span>
-        <h4>{job.title}</h4>
-        {job.sourceUrl ? <a href={job.sourceUrl} target="_blank" rel="noreferrer">打开投递 / 来源链接</a> : null}
-      </header>
-      <InsightBlock title="为什么排前面" items={job.matchEvidence || [`匹配分 ${job.matchScore || 0}，机会分 ${job.opportunityScore || 0}`]} />
-      <InsightBlock title="岗位硬要求" items={(job.requirements || []).slice(0, 5)} />
-      <InsightBlock title="缺口关键词" items={(job.gapKeywords || []).length ? job.gapKeywords : ["暂无明显缺口"]} />
-      <InsightBlock title="推荐突出项目" items={(job.recommendedProjects || []).length ? job.recommendedProjects : ["请先解析个人材料，系统会自动匹配项目证据"]} />
-      <InsightBlock title="简历建议" items={job.resumeAdvice || ["补充结果指标、协作对象和上线状态"]} />
-      <textarea className="jd-input radar-jd" value={jd} onChange={(event) => onJdChange(event.target.value)} aria-label="岗位 JD" />
-      <div className="import-row compact-import">
-        <input value={jobUrl} onChange={(event) => onJobUrlChange(event.target.value)} placeholder="补充单个官方 JD URL" aria-label="导入 JD URL" />
-        <button type="button" onClick={onImport} disabled={importDisabled}><Download size={16} />导入</button>
-      </div>
-    </aside>
-  );
+function createId(prefix) {
+  return prefix + "-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
 }
 
-function InsightBlock({ title, items }) {
-  return (
-    <section className="insight-block">
-      <h5>{title}</h5>
-      <ul>
-        {(items || []).map((item) => <li key={item}>{item}</li>)}
-      </ul>
-    </section>
-  );
-}
-
-function breakdownLabel(key) {
-  return {
-    match: "匹配",
-    freshness: "新鲜",
-    apply: "可投",
-    company: "公司",
-    typeFit: "类型"
-  }[key] || key;
-}
-
-function SourceSelector({ sources, selected, onToggle }) {
-  if (!sources.length) return null;
-  return (
-    <div className="source-selector">
-      {sources.map((source) => (
-        <label key={source.id} className={selected.includes(source.id) ? "source-chip active" : "source-chip"}>
-          <input type="checkbox" checked={selected.includes(source.id)} onChange={() => onToggle(source.id)} />
-          {source.company}
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function FormalResumeEditor({ resume, onChange }) {
-  return (
-    <aside className="formal-editor">
-      <div className="editor-grid">
-        <label>姓名<input value={resume.name} onChange={(event) => onChange("name", event.target.value)} /></label>
-        <label>目标岗位<input value={resume.targetTitle} onChange={(event) => onChange("targetTitle", event.target.value)} /></label>
-        <label>手机<input value={resume.contact.phone} onChange={(event) => onChange("contact.phone", event.target.value)} /></label>
-        <label>邮箱<input value={resume.contact.email} onChange={(event) => onChange("contact.email", event.target.value)} /></label>
-        <label>GitHub<input value={resume.contact.github} onChange={(event) => onChange("contact.github", event.target.value)} /></label>
-        <label>城市<input value={resume.contact.location} onChange={(event) => onChange("contact.location", event.target.value)} /></label>
-      </div>
-      <label>个人简介<textarea value={resume.summary} onChange={(event) => onChange("summary", event.target.value)} /></label>
-      <label>教育经历<textarea value={joinLines(resume.education)} onChange={(event) => onChange("education", event.target.value)} /></label>
-      <label>技能标签<textarea value={joinLines(resume.skills)} onChange={(event) => onChange("skills", event.target.value)} /></label>
-      <label>项目经历<textarea value={joinLines(resume.projects)} onChange={(event) => onChange("projects", event.target.value)} /></label>
-      <label>实习/工作经历<textarea value={joinLines(resume.experience)} onChange={(event) => onChange("experience", event.target.value)} /></label>
-      <label>奖项/证书/指标<textarea value={joinLines(resume.awards)} onChange={(event) => onChange("awards", event.target.value)} /></label>
-      <p className="ai-source">生成来源：{resume.source === "ai" ? "MiniMax AI" : "本地规则"} {resume.model ? `// ${resume.model}` : ""}</p>
-    </aside>
-  );
-}
-
-function FormalResumePreview({ resume, avatar, template }) {
-  const contact = [
-    resume.contact.phone,
-    resume.contact.email,
-    resume.contact.location,
-    resume.contact.github,
-    resume.contact.website
-  ].filter(Boolean);
-  return (
-    <article className={`formal-resume-page template-${resume.templateId || template?.id || "default"}`} style={{ "--resume-accent": template?.accent || "#111827" }}>
-      <header className="formal-resume-head">
-        <div>
-          <h3>{resume.name}</h3>
-          <strong>{resume.targetTitle}</strong>
-          {template ? <em>{template.label}</em> : null}
-          <p>{contact.join("  |  ") || "联系方式待补充"}</p>
-        </div>
-        <div className={avatar ? "avatar-frame has-image" : "avatar-frame"}>
-          {avatar ? <img src={avatar} alt="简历头像" /> : <UserRound size={44} />}
-        </div>
-      </header>
-      <ResumeSection title="个人简介"><p>{resume.summary || "个人简介待补充"}</p></ResumeSection>
-      <ResumeSection title="教育经历"><BulletList items={resume.education} /></ResumeSection>
-      <ResumeSection title="专业技能"><SkillList items={resume.skills} /></ResumeSection>
-      <ResumeSection title="项目经历"><BulletList items={resume.projects} /></ResumeSection>
-      <ResumeSection title="实习 / 工作经历"><BulletList items={resume.experience} /></ResumeSection>
-      <ResumeSection title="奖项 / 证书 / 关键指标"><BulletList items={resume.awards} /></ResumeSection>
-    </article>
-  );
-}
-
-function ResumeSection({ title, children }) {
-  return (
-    <section className="formal-section">
-      <h4>{title}</h4>
-      {children}
-    </section>
-  );
-}
-
-function BulletList({ items = [] }) {
-  const rows = items.length ? items : ["待补充"];
-  return <ul>{rows.map((item) => <li key={item}>{item}</li>)}</ul>;
-}
-
-function SkillList({ items = [] }) {
-  const rows = items.length ? items : ["待补充"];
-  return <div className="formal-skills">{rows.map((item) => <span key={item}>{item}</span>)}</div>;
-}
-
-function ResumeVariant({ variant }) {
-  return (
-    <article className="resume-card">
-      <header className="variant-hero">
-        <div>
-          <span className="tag">TARGET CASE // {variant.roleLabel}</span>
-          <h3>{variant.title}</h3>
-          <p>{variant.summary}</p>
-        </div>
-        <div className="score-badge"><strong>{variant.fitScore}</strong><span>FIT / 100</span></div>
-      </header>
-      <StreamDecode text={variant.diff.join("  ")} />
-      <section className="variant-skills">
-        <div><span>ATS KEYWORDS</span><strong>{variant.atsScore}</strong></div>
-        <div className="mini-tags">{variant.skills.map((skill) => <span key={skill}>{skill}</span>)}</div>
-      </section>
-      <section className="evidence-section">
-        <div className="section-intro">
-          <span>01 / PROJECT EVIDENCE</span>
-          <h4>为什么选这些项目，<br />面试官会怎么追问。</h4>
-          <p>排序来自目标岗位与 JD 命中度；改写只重排原始事实，不新增指标。</p>
-        </div>
-        <div className="evidence-list">
-          {(variant.projectStrategy || []).map((project, index) => <ProjectEvidence key={project.id || project.title} project={project} index={index} />)}
-        </div>
-      </section>
-      {variant.interviewPlan ? <InterviewWorkspace plan={variant.interviewPlan} /> : null}
-      <section className="supporting-copy">
-        <div>
-          <span>实习 / 工作证据</span>
-          {variant.experience.length ? variant.experience.map((item) => <p className="bullet" key={item}>• {item}</p>) : <p className="muted">原始材料中实习经历不足，建议补充职责、动作和结果。</p>}
-        </div>
-        <div>
-          <span>沟通开场</span>
-          <div className="greeting">{variant.greeting}</div>
-        </div>
-      </section>
-    </article>
-  );
-}
-
-function ProjectEvidence({ project, index }) {
-  return (
-    <article className="evidence-card">
-      <div className="evidence-rank"><span>0{index + 1}</span><strong>{project.relevanceScore}</strong><small>RELEVANCE</small></div>
-      <div className="evidence-content">
-        <header><h5>{project.title}</h5><span className={project.evidenceStatus}>{project.evidenceStatus === "quantified" ? "已有量化证据" : "建议补充指标"}</span></header>
-        <div className="keyword-line">{project.matchedKeywords.length ? project.matchedKeywords.map((item) => <b key={item}>{item}</b>) : <b>待补岗位关键词</b>}</div>
-        <p className="tailored-bullet">{project.tailoredBullet}</p>
-        <details>
-          <summary>查看原始事实与面试追问 <ArrowRight size={15} /></summary>
-          <p className="source-copy">{project.original}</p>
-          <ol>{project.interviewQuestions.map((question) => <li key={question}>{question}</li>)}</ol>
-        </details>
-      </div>
-    </article>
-  );
-}
-
-function InterviewWorkspace({ plan }) {
-  return (
-    <section className="interview-workspace">
-      <div className="section-intro inverse">
-        <span>02 / INTERVIEW DEFENSE</span>
-        <h4>简历写完，<br />面试才刚开始。</h4>
-        <p>围绕 {plan.roleLabel} 的项目深挖、技术主线和行为故事进行复习。</p>
-      </div>
-      <div className="interview-content">
-        <div className="topic-grid">
-          {plan.technicalTopics.map((topic) => (
-            <article key={topic.id}><span>{topic.priority}</span><h5>{topic.title}</h5><p>{topic.why}</p></article>
-          ))}
-        </div>
-        <div className="schedule">
-          <header><span>7-DAY SPRINT</span><strong>从简历到可面试</strong></header>
-          {plan.schedule.map((item) => (
-            <div key={item.day}><b>{item.day}</b><strong>{item.title}</strong><p>{item.action}</p></div>
-          ))}
-        </div>
-        <details className="defense-questions">
-          <summary>展开完整追问清单 <span>{plan.resumeDefense.length} QUESTIONS</span></summary>
-          <ol>{plan.resumeDefense.map((question) => <li key={question}>{question}</li>)}</ol>
-        </details>
-      </div>
-    </section>
-  );
-}
-
-function StreamDecode({ text }) {
-  const [visible, setVisible] = useState("");
-  function start() {
-    setVisible("");
-    let index = 0;
-    const timer = window.setInterval(() => {
-      index += 3;
-      setVisible(text.slice(0, index));
-      if (index >= text.length) window.clearInterval(timer);
-    }, 14);
-  }
-  return (
-    <button type="button" className="decode-line" onMouseEnter={start} onFocus={start}>
-      <span>&gt; HOVER_TO_DECODE</span>
-      <b>{visible || "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"}</b>
-    </button>
-  );
-}
-
-function JobList({ jobs, onQueue, onSelect, selectedJobId }) {
-  if (!jobs.length) return <EmptyState text="还没有岗位。可以启动 Boss 浏览器抓取当前搜索页，也可以先加载示例岗位验证流程。" />;
-  return (
-    <div className="job-list">
-      {jobs.map((job) => (
-        <article key={job.id || job.url} className={selectedJobId === job.id ? "selected" : ""}>
-          <div>
-            <strong>{job.title}</strong>
-            <span>{job.company || "未知公司"} · {job.location || "未知地点"} · {job.salary || "薪资未展示"}</span>
-            <p>{job.description}</p>
-            {job.requirements?.length ? (
-              <ul className="requirement-list">
-                {job.requirements.slice(0, 4).map((item) => <li key={item}>{item}</li>)}
-              </ul>
-            ) : null}
-            {job.sourceUrl ? <a href={job.sourceUrl} target="_blank" rel="noreferrer">投递 / 来源链接</a> : null}
-          </div>
-          <div className="job-actions">
-            <b>{job.matchScore || 0}</b>
-            {onSelect ? <button type="button" onClick={() => onSelect(job)}><Target size={15} />选择</button> : null}
-            <button type="button" onClick={() => onQueue(job)}><Plus size={15} />入队</button>
-          </div>
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function QueueList({ queue }) {
-  if (!queue.length) return <EmptyState text="队列为空。先从岗位雷达中选择岗位入队。" />;
-  return (
-    <div className="queue-list">
-      {queue.map((item) => (
-        <div key={item.id}>
-          <span>{item.job.company || "公司"} // {item.job.title}</span>
-          <b>{item.status}</b>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function LogPanel({ events, bossStatus }) {
-  const logs = [
-    ...(events || []).map((event) => `${event.type}: ${event.message}`),
-    ...((bossStatus.logs || []).map((log) => `boss: ${log.message}`))
-  ].slice(0, 12);
-  return (
-    <div className="log-panel">
-      {logs.length ? logs.map((item, index) => <span key={`${item}-${index}`}>&gt; {item}</span>) : <span>&gt; WAITING_FOR_EVENTS</span>}
-    </div>
-  );
-}
-
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
