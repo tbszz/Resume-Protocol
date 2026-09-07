@@ -13,6 +13,7 @@ import {
   FileText,
   Loader2,
   Menu,
+  MessageSquareText,
   MonitorUp,
   Play,
   Plus,
@@ -26,9 +27,11 @@ import {
   Upload,
   UserRound,
   Wand2,
+  Zap,
   X
 } from "lucide-react";
 import "./styles.css";
+import { planAgentAction } from "./agentIntent.js";
 
 const API_BASE = window.location.port === "8787" ? "" : "http://127.0.0.1:8787";
 
@@ -69,7 +72,8 @@ const DEFAULT_SOURCE_IDS = ["speedy-ai", "speedy-swe", "zapply-swe", "0voice-spr
 
 function SiteNav({ menuOpen, onMenuToggle, onNavigate }) {
   const links = [
-    ["流程", "#workflow"],
+    ["Agent 入口", "#top"],
+    ["职业资料", "#materials"],
     ["岗位雷达", "#jobs"],
     ["正式简历", "#resume"],
     ["面试作战室", "#interview"]
@@ -77,11 +81,11 @@ function SiteNav({ menuOpen, onMenuToggle, onNavigate }) {
   return (
     <>
       <nav className="site-nav" aria-label="主导航">
-        <a className="brand-mark" href="#top" onClick={onNavigate}>RESUME<span>®</span>PROTOCOL</a>
+        <a className="brand-mark" href="#top" onClick={onNavigate}>RESUME <span>R/01</span> PROTOCOL</a>
         <div className="nav-links">
           {links.map(([label, href]) => <a key={href} href={href}>{label}</a>)}
         </div>
-        <a className="nav-cta" href="#materials">开始构建 <ArrowRight size={15} /></a>
+        <a className="nav-cta" href="#top">Ask Agent <ArrowRight size={15} /></a>
         <button className="menu-trigger" type="button" onClick={onMenuToggle} aria-expanded={menuOpen} aria-label="打开导航">
           {menuOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
@@ -95,46 +99,132 @@ function SiteNav({ menuOpen, onMenuToggle, onNavigate }) {
   );
 }
 
-function Hero({ role, roleScores, selectedJob, variant, onRoleChange }) {
-  const [phraseIndex, setPhraseIndex] = useState(0);
-  const phrases = ["岗位真正要的证据", "面试能够讲清的项目", "一页经得起追问的简历"];
-  useEffect(() => {
-    const timer = window.setInterval(() => setPhraseIndex((current) => (current + 1) % phrases.length), 2600);
-    return () => window.clearInterval(timer);
-  }, []);
-  const activeRole = ROLE_CARDS.find((item) => item.id === role) || ROLE_CARDS[0];
-  const evidenceTokens = [
-    selectedJob ? `${selectedJob.company} / ${selectedJob.title}` : `${activeRole.label} / 等待目标 JD`,
-    ...(variant?.strengths || [activeRole.hint]),
-    ...(variant?.gaps?.map((item) => `待补：${item}`) || ["事实优先", "不虚构指标"])
+function AgentGateway({ context, selectedJob, onCommand }) {
+  const [prompt, setPrompt] = useState("");
+  const [messages, setMessages] = useState([
+    { role: "agent", text: "告诉我你现在想完成什么。我会检查前置条件，并带你进入正确步骤。" }
+  ]);
+  const [submitting, setSubmitting] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const quickActions = [
+    { label: "诊断当前简历", prompt: "帮我诊断当前简历的完整度和项目证据", icon: <FileSearch size={15} /> },
+    { label: "匹配目标岗位", prompt: "帮我找适合当前背景的 AI Agent 校招岗位", icon: <Radar size={15} /> },
+    { label: "生成岗位版", prompt: "根据已选择的 JD 生成岗位版简历", icon: <Wand2 size={15} /> },
+    { label: "准备项目面试", prompt: "根据当前岗位版简历准备项目面试和追问", icon: <MessageSquareText size={15} /> }
   ];
+
+  async function submit(nextPrompt = prompt) {
+    const value = String(nextPrompt || "").trim();
+    if (!value) {
+      setMessages((current) => [...current, { role: "agent", text: "先说你现在最想完成什么，我才能安排下一步。", tone: "warning" }]);
+      return;
+    }
+    setPrompt("");
+    setSubmitting(true);
+    setMessages((current) => [...current, { role: "user", text: value }]);
+    const result = await onCommand(value);
+    setMessages((current) => [...current, { role: "agent", text: result.message, tone: result.tone || "default" }]);
+    setSubmitting(false);
+  }
+
   return (
-    <section className="hero" id="top">
-      <div className="hero-kicker"><span>CAREER OPERATING SYSTEM</span><span>SHANGHAI · LOCAL FIRST · 2026</span></div>
-      <div className="hero-copy">
-        <p className="hero-index">[ 01 / POSITIONING ]</p>
-        <h1>把你的经历<br />写成<span>{phrases[phraseIndex]}</span><i aria-hidden="true">_</i></h1>
-        <p className="hero-deck">不是把 JD 关键词塞进简历，而是选择最相关的事实、重排项目叙事，并提前准备每一句可能引出的面试追问。</p>
+    <section className={`agent-gateway${videoFailed ? " video-fallback" : ""}`} id="top">
+      <video
+        className="gateway-video"
+        src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260402_134434_5de46cb4-38e7-42a6-a8bc-6e62b2fd6c7b.mp4"
+        autoPlay
+        loop
+        muted
+        playsInline
+        preload="metadata"
+        aria-hidden="true"
+        onCanPlay={(event) => event.currentTarget.play().catch(() => {})}
+        onError={() => setVideoFailed(true)}
+      />
+      <div className="gateway-scrim" aria-hidden="true" />
+      <div className="gateway-topline"><span>YOUR CAREER CONTEXT, ONE CONVERSATION AWAY</span><span>LOCAL-FIRST · FACT-BOUND</span></div>
+      <div className="gateway-copy">
+        <p>RESUME PROTOCOL / AGENT 01</p>
+        <AnimatedText as="h1" text="一次对话，启动整个求职流程" />
+        <AnimatedText as="div" className="gateway-subtitle" text="从职业资料、目标岗位到定制简历和面试复习，让每一步共享同一份真实上下文。" />
       </div>
-      <div className="role-switcher" aria-label="目标岗位">
-        {ROLE_CARDS.map((item) => (
-          <button key={item.id} type="button" className={role === item.id ? "active" : ""} onClick={() => onRoleChange(item.id)}>
-            <span>{item.label}</span><strong>{roleScores[item.id]?.score ?? roleScores[item.id] ?? "—"}</strong><small>{item.hint}</small>
+      <form className="agent-composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        <div className="agent-transcript" aria-live="polite">
+          {messages.slice(-3).map((message, index) => (
+            <p key={`${message.role}-${index}-${message.text}`} className={`${message.role} ${message.tone || ""}`}>
+              <span>{message.role === "agent" ? "PROTOCOL" : "YOU"}</span>{message.text}
+            </p>
+          ))}
+          {submitting ? <p className="agent thinking"><span>PROTOCOL</span>正在判断下一步<span className="thinking-dots">...</span></p> : null}
+        </div>
+        <div className="composer-input-row">
+          <textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="告诉我目标，例如：帮我按这个前端 JD 优化简历…"
+            aria-label="向求职 Agent 描述目标"
+            rows={2}
+          />
+          <button className="composer-send" type="submit" disabled={submitting} aria-label="发送给求职 Agent">
+            {submitting ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
           </button>
-        ))}
-      </div>
-      <EvidenceTape items={evidenceTokens} />
-      <a className="scroll-cue" href="#materials"><span>进入工作流</span><ArrowDown size={18} /></a>
+        </div>
+        <div className="composer-tools">
+          <div className="quick-action-scroll scrollbar-hide">
+            {quickActions.map((item) => (
+              <button key={item.label} type="button" onClick={() => submit(item.prompt)} disabled={submitting}>{item.icon}{item.label}</button>
+            ))}
+          </div>
+        </div>
+        <AgentContextRail context={context} selectedJob={selectedJob} />
+      </form>
+      <a className="gateway-scroll" href="#promise"><span>Explore the protocol</span><ArrowDown size={18} /></a>
+      <div className="gateway-bottom-fade" aria-hidden="true" />
     </section>
   );
 }
 
-function EvidenceTape({ items }) {
-  const rows = [...items, ...items];
+function AnimatedText({ as: Tag = "p", text, className = "" }) {
+  const segments = typeof Intl !== "undefined" && Intl.Segmenter
+    ? [...new Intl.Segmenter("zh-CN", { granularity: "word" }).segment(text)].map((item) => item.segment)
+    : text.split(/(\s+)/);
   return (
-    <div className="evidence-tape" aria-label="当前岗位证据">
-      <div>{rows.map((item, index) => <span key={`${item}-${index}`}>◆ {item}</span>)}</div>
+    <Tag className={`animated-text ${className}`.trim()} aria-label={text}>
+      {segments.map((segment, index) => /^\s+$/.test(segment)
+        ? segment
+        : <span aria-hidden="true" key={`${segment}-${index}`} style={{ "--word-index": index }}>{segment}</span>)}
+    </Tag>
+  );
+}
+
+function AgentContextRail({ context, selectedJob }) {
+  const states = [
+    ["职业资料", context.hasProfile],
+    ["目标 JD", context.hasJob],
+    ["岗位版", context.hasVariant],
+    ["面试计划", context.hasVariant]
+  ];
+  return (
+    <div className="agent-context-rail">
+      <span>{selectedJob ? `${selectedJob.company} · ${selectedJob.title}` : "CONTEXT READINESS"}</span>
+      <div>{states.map(([label, ready]) => <b key={label} className={ready ? "ready" : ""}><i />{label}</b>)}</div>
     </div>
+  );
+}
+
+function PromiseSection() {
+  return (
+    <section className="promise-section" id="promise">
+      <div><span>ONE ENTRY / FOUR WORKFLOWS</span><AnimatedText as="h2" text="不是多一个聊天框，是一个知道下一步的求职 Agent" /></div>
+      <AnimatedText as="p" text="它读取当前资料是否完整、是否选定目标岗位、是否已经生成岗位版，再决定直接执行还是先补齐前置条件。对话降低门槛，结构化工作台保留深度。" />
+      <div className="promise-orbit" aria-hidden="true"><Zap size={22} /><span>CONTEXT → ACTION</span></div>
+    </section>
   );
 }
 
@@ -246,6 +336,7 @@ function App() {
       setProfileResult(result);
       setIntakeResult(result);
     }
+    return result;
   }
 
   async function uploadFile(event) {
@@ -295,6 +386,7 @@ function App() {
       })
     );
     if (result?.variant) setVariant(result.variant);
+    return result;
   }
 
   async function loadDemoJobs() {
@@ -468,17 +560,52 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
+  function navigateTo(target) {
+    window.requestAnimationFrame(() => {
+      document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  async function runAgentCommand(input) {
+    const plan = planAgentAction(input, {
+      hasMaterial: Boolean(rawMaterial.trim()),
+      hasProfile: Boolean(profile),
+      hasJob: Boolean(selectedJob),
+      hasVariant: Boolean(variant)
+    });
+    if (plan.action === "analyze") {
+      navigateTo(plan.target);
+      const result = await parseMaterial();
+      return result
+        ? { ...plan, message: `资料分析完成：当前完整度 ${result.completeness?.completeness ?? result.diagnosis?.completeness ?? 0}%。我已把缺口和优势放在职业资料区。` }
+        : { ...plan, tone: "warning", message: "资料分析没有完成，请查看页面中的错误提示后重试。" };
+    }
+    if (plan.action === "open-jobs") {
+      setRadarOpen(true);
+      navigateTo("jobs");
+      return plan;
+    }
+    if (plan.action === "generate-resume") {
+      const result = await generateResume();
+      navigateTo("interview");
+      return result?.variant
+        ? { ...plan, message: `岗位版已生成：匹配度 ${result.variant.fitScore}/100。项目证据与面试追问已经同步进入作战室。` }
+        : { ...plan, tone: "warning", message: "岗位版没有生成成功，请检查目标 JD 和页面错误提示后重试。" };
+    }
+    navigateTo(plan.target);
+    return plan;
+  }
+
   return (
     <main className="product-shell">
       <div className="grain-layer" aria-hidden="true" />
       <SiteNav menuOpen={menuOpen} onMenuToggle={() => setMenuOpen((current) => !current)} onNavigate={() => setMenuOpen(false)} />
-      <Hero
-        role={role}
-        roleScores={roleScores}
+      <AgentGateway
+        context={{ hasProfile: Boolean(profile), hasJob: Boolean(selectedJob), hasVariant: Boolean(variant) }}
         selectedJob={selectedJob}
-        variant={variant}
-        onRoleChange={setRole}
+        onCommand={runAgentCommand}
       />
+      <PromiseSection />
       <section className="protocol-stage" id="workflow">
       <aside className="side-rail">
         <div className="system-lines">
