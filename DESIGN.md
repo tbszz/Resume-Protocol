@@ -1,80 +1,28 @@
-# Design
+# Resume Protocol Design
 
-## Source of truth
+Updated: 2026-09-08. Supersedes the previous video conversation design.
 
-- Status: Active
-- Last refreshed: 2026-09-07
-- Primary surface: a single persistent Career Agent chat.
-- Evidence reviewed: src/main.jsx, src/chatStore.js, src/agentIntent.js, and docs/plans/2026-09-07-chat-only-agent-design.md.
+## Entrance and workspace
 
-## Product intent
+Independent editorial landing page with Resume Protocol branding, supplied one-shot video, serif display headings and sans-serif body. Login/register use real accounts; Get Started enters the workspace. Hash navigation restores the workspace on refresh.
 
-Resume Protocol is a conversation-first career agent for job seekers. The product has one job: let the user paste a resume, a JD, or a goal and complete the next career task without learning a dashboard.
+Three columns: expandable projects and conversations; transcript and composer; original PDF, evidence annotations and optimized downloads. Account and model settings are bottom-left. Solid white/black conversation backgrounds, neutral secondary surfaces, modest sans-serif Chinese headings, safe wrapping and dismissible mobile drawers. Four colored loading dots track real model work; respect reduced motion.
 
-The UI must not expose a separate resume workbench, job radar, interview room, multi-step form, landing-page section stack, or anchor navigation. Those capabilities exist as tools invoked from the conversation and rendered as inline results.
+## Data and model truth
 
-## Brand
+SQLite stores user-scoped projects, conversations and documents. HttpOnly sessions; encrypted custom model keys never returned. Default or custom OpenAI/Anthropic-compatible endpoints. Public conversation text does not name the default provider. Preserve existing records and explicit legacy import.
 
-- Personality: calm, precise, evidence-bound, and proactive.
-- Trust signals: local conversation persistence, visible context readiness, explicit tool progress, and source-faithful resume output.
-- Avoid: universal-AI claims, fake account controls, decorative statistics, excessive glow, and chatbot mascots.
+Uploaded material receives model annotations before its first substantive answer. Quotes must occur in the source; unsupported numbers and extra technologies in edits are rejected. Rule fallback is labeled. Completed tool replies summarize validated results; material-based freeform replies undergo a separate factual review.
 
-## Information architecture
+Qualification precedes ranking: source completeness, job type, freshness, degree, major, experience, work authorization and required skills. Failed checks exclude; missing evidence goes to verification. Aggregator metadata is not a complete JD or proof of an open role. Preferred qualifications are not hard requirements.
 
-- Left: brand, new chat, persistent conversation history, and local-storage notice.
-- Top: active Agent identity and readiness for profile, target role, and tailored resume.
-- Center: one message stream containing user messages, Agent replies, tool progress, and result cards.
-- Bottom: one persistent composer with file upload.
-- Empty conversation: a restrained video atmosphere, one thesis, and four starter prompts.
+## Deliverables and checks
 
-## Agent capabilities
+Original PDF retained; quote-matched highlights added in a separate annotated copy. Generated resumes have authenticated PDF and editable DOCX downloads. Do not show active downloads before generation. Preserve source facts and Chinese text.
 
-- Resume diagnosis: pasted or uploaded material becomes a structured profile with strengths, gaps, and completeness.
-- Job matching: the Agent returns selectable job cards inside the conversation.
-- Tailored resume: the selected job and saved profile produce a role-specific summary, skills, and project bullets.
-- Interview preparation: the generated variant produces technical topics, project questions, and a seven-day plan.
-- Prerequisites are requested in chat; the Agent never navigates to another page.
+Verify light/dark desktop and narrow layouts, real model annotation/generation, ownership and persistence, qualification regressions, PDF/DOCX content and actual PDF highlight coordinates. Secrets remain outside the browser bundle. Test with isolated accounts and data.
 
-## Conversation memory
+## Workspace update — 2026-09-12
+Only the authenticated workspace uses assistant-ui React primitives and a warm Claude-inspired layout. Landing markup, original stylesheet and document head remain unchanged from the start of this update, guarded by workspaceRuntime.test.js. Business result cards, upload parse status, job selection, previews and exports retain the existing server contracts. The runtime adapts server messages without persisting synthetic loading messages.
 
-- Storage key: resume-protocol.chat.v1.
-- Every conversation stores messages and its own profile, job list, selected target, and generated variant.
-- The first user message creates the history title.
-- Refresh, new-chat creation, and history switching must preserve the associated context.
-- Invalid saved state falls back to a fresh conversation.
-
-## Visual language
-
-- Colors: Canvas #F6F7F5, Surface #FFFFFF, Sidebar #18201F, Ink #171A19, Muted #6E7471, Signal #B9F36B.
-- Type: Inria Serif for the empty-state thesis, Helvetica Neue for interaction text, IBM Plex Mono for status labels.
-- Layout: 280px sidebar on desktop, full-height conversation stage, 850px message column, 820px composer.
-- Signature: the supplied CloudFront video is desaturated and visible only in the empty conversation.
-- Motion: one message-entry motion and restrained hover feedback; respect reduced motion.
-
-## Responsive behavior
-
-- Desktop: persistent sidebar and context readiness pills.
-- Mobile: sidebar becomes a dismissible drawer, context pills collapse, message cards become one column, composer remains reachable.
-- Required validation widths: 390px and the default desktop viewport.
-- No horizontal page overflow at supported widths.
-
-## Accessibility
-
-- Enter sends and Shift+Enter adds a line break.
-- Buttons and composer have visible keyboard focus.
-- Conversation uses a live log region; status controls use explicit labels.
-- Video is decorative, muted, inline, and has a static fallback.
-
-## Constraints
-
-- React + Vite + existing Express APIs; no new runtime dependencies.
-- Chat history is local browser storage, not a user account or cloud sync.
-- Generated claims remain constrained to parsed user material.
-- Real job applications and platform automation are not triggered by the chat UI.
-
-## Verification contract
-
-- Unit tests: chat state, persistence recovery, result normalization, and intent prerequisites.
-- Source contract: no legacy workbench sections or workflow anchors in src/main.jsx.
-- Browser flow: resume analysis → job search → target selection → tailored resume → interview plan → refresh persistence.
-- Responsive flow: mobile drawer, composer, result cards, and zero horizontal overflow.
+Validation: npm test, node src/workspaceRuntime.test.js and npm run test:workspace-ui pass. Browser coverage uses the real React production build, isolated database and a deterministic model fixture; it covers sending, copying, cancellation, upload, preview, settings, conversation switching and mobile overflow. This browser run does not call the live model.

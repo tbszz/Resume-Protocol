@@ -6,6 +6,16 @@ const WELCOME_MESSAGE = {
   kind: "text"
 };
 
+const DEFAULT_CONTEXT = {
+  material: "",
+  profile: null,
+  diagnosis: null,
+  jobs: [],
+  selectedJob: null,
+  variant: null,
+  formalResume: null
+};
+
 export function createConversation(options = {}) {
   const now = options.now || new Date().toISOString();
   const id = options.id || createId("chat");
@@ -15,15 +25,7 @@ export function createConversation(options = {}) {
     createdAt: now,
     updatedAt: now,
     messages: [{ ...WELCOME_MESSAGE, id: `${id}-welcome`, createdAt: now }],
-    context: {
-      material: "",
-      profile: null,
-      diagnosis: null,
-      jobs: [],
-      selectedJob: null,
-      variant: null,
-      formalResume: null
-    }
+    context: createDefaultContext()
   };
 }
 
@@ -79,7 +81,9 @@ export function loadChatState(storage, fallbackOptions = {}) {
     if (parsed?.version !== 1 || !Array.isArray(parsed.conversations) || !parsed.conversations.length) {
       return createChatState(fallbackOptions);
     }
-    const conversations = parsed.conversations.filter(isConversation);
+    const conversations = parsed.conversations
+      .map((conversation) => normalizeConversation(conversation, fallbackOptions))
+      .filter(Boolean);
     if (!conversations.length) return createChatState(fallbackOptions);
     const activeConversationId = conversations.some((item) => item.id === parsed.activeConversationId)
       ? parsed.activeConversationId
@@ -92,7 +96,8 @@ export function loadChatState(storage, fallbackOptions = {}) {
 
 export function saveChatState(storage, state) {
   try {
-    storage?.setItem(CHAT_STORAGE_KEY, JSON.stringify(state));
+    if (typeof storage?.setItem !== "function") return false;
+    storage.setItem(CHAT_STORAGE_KEY, JSON.stringify(state));
     return true;
   } catch {
     return false;
@@ -116,8 +121,41 @@ function updateConversation(state, conversationId, updater) {
   };
 }
 
-function isConversation(value) {
-  return Boolean(value?.id && typeof value.title === "string" && Array.isArray(value.messages) && value.context);
+function normalizeConversation(value, fallbackOptions = {}) {
+  if (!value?.id) return null;
+  const now = fallbackOptions.now || new Date().toISOString();
+  const messages = Array.isArray(value.messages)
+    ? value.messages.map((message) => normalizeMessage(message, now)).filter(Boolean)
+    : [];
+
+  return {
+    ...value,
+    id: String(value.id),
+    title: typeof value.title === "string" ? value.title : "新对话",
+    createdAt: typeof value.createdAt === "string" ? value.createdAt : now,
+    updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : now,
+    messages,
+    context: { ...createDefaultContext(), ...(isPlainObject(value.context) ? value.context : {}) }
+  };
+}
+
+function normalizeMessage(value, now) {
+  if (!isPlainObject(value) || typeof value.role !== "string" || typeof value.content !== "string") {
+    return null;
+  }
+  return {
+    ...value,
+    id: value.id ? String(value.id) : createId("message"),
+    createdAt: typeof value.createdAt === "string" ? value.createdAt : now
+  };
+}
+
+function createDefaultContext() {
+  return { ...DEFAULT_CONTEXT, jobs: [] };
+}
+
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function createId(prefix) {

@@ -1,768 +1,1002 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  Bot,
-  BriefcaseBusiness,
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  Circle,
-  FileSearch,
+  ChevronLeft,
+  PanelLeft,
+  PanelRight,
+  ChevronRight,
+  Download,
   FileText,
-  LoaderCircle,
+  Folder,
+  LogOut,
   Menu,
   MessageSquareText,
+  Moon,
   Paperclip,
   Plus,
-  Radar,
   Send,
-  Sparkles,
+  Settings,
+  Sun,
   Trash2,
-  WandSparkles,
+  Upload,
   X
 } from "lucide-react";
-import { buildJobQueries, planAgentAction } from "./agentIntent.js";
-import { normalizeResultItems } from "./chatResults.js";
 import {
-  appendMessage,
-  createConversation,
-  deleteConversation,
-  loadChatState,
-  saveChatState,
-  updateConversationContext
-} from "./chatStore.js";
+  importLocalConversations,
+  requestJson,
+  streamConversationMessage,
+  validateResumeFile
+} from "./api.js";
 import "./styles.css";
+import { readableDocumentName } from './documentName.js';
+const WorkspaceChat = React.lazy(() => import('./components/WorkspaceChat.jsx').then(module => ({ default: module.WorkspaceChat })));
 
-const API_BASE = window.location.port === "8787" ? "" : "http://127.0.0.1:8787";
-const VIDEO_URL = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260402_134434_5de46cb4-38e7-42a6-a8bc-6e62b2fd6c7b.mp4";
-
-const QUICK_PROMPTS = [
-  {
-    label: "诊断我的简历",
-    prompt: "帮我诊断当前简历，重点检查项目证据和信息完整度",
-    description: "找出缺失信息与薄弱证据",
-    icon: FileSearch
-  },
-  {
-    label: "寻找目标岗位",
-    prompt: "帮我找适合当前背景的 AI Agent 校招岗位",
-    description: "返回可直接选择的岗位候选",
-    icon: Radar
-  },
-  {
-    label: "生成岗位版简历",
-    prompt: "根据当前资料和目标 JD 生成岗位版简历",
-    description: "按 JD 重排技能与项目证据",
-    icon: WandSparkles
-  },
-  {
-    label: "准备项目面试",
-    prompt: "根据当前岗位版简历准备项目面试和追问",
-    description: "生成项目深挖与七天计划",
-    icon: MessageSquareText
-  }
-];
+const LANDING_VIDEO_URL = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260715_112512_f3b7a972-83dd-4401-9c4b-f08d3733f5ca.mp4";
+const THEME_STORAGE_KEY = "resume-protocol.theme";
+const QUICK_PROMPTS = ["诊断这份简历", "匹配目标岗位", "生成优化稿", "准备面试追问"];
+const AUTH_ENDPOINTS = {
+  login: "/api/auth/login",
+  register: "/api/auth/register"
+};
 
 function App() {
-  const [chatState, setChatState] = useState(() => loadChatState(window.localStorage));
-  const [draft, setDraft] = useState("");
-  const [pending, setPending] = useState(null);
+  const [view, setView] = useState(() => window.location.hash === "#workspace" ? "workspace" : "landing");
+  const [booting, setBooting] = useState(true);
+  const [user, setUser] = useState(null);
+  const [projects, setProjects] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState("");
+  const [conversations, setConversations] = useState([]);
+  const [activeConversationId, setActiveConversationId] = useState("");
+  const [documents, setDocuments] = useState([]);
+  const [activeDocumentId, setActiveDocumentId] = useState("");
+  const [modelSettings, setModelSettings] = useState({ mode: "default", protocol: "openai", baseUrl: "", model: "", hasApiKey: false });
+  const [authMode, setAuthMode] = useState("login");
+  const [authVisible, setAuthVisible] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [projectEditor, setProjectEditor] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [videoFailed, setVideoFailed] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    const onKey = (event) => {
+      if (view !== 'workspace') return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        if (window.matchMedia('(max-width: 860px)').matches) setSidebarOpen(value=>!value);
+        else setSidebarCollapsed(value=>!value);
+      }
+      if (event.key === 'Escape') { setPanelOpen(false); setSidebarOpen(false); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [view]);
+  const [pending, setPending] = useState(null);
+  const [notice, setNotice] = useState("");
+  const [theme, setTheme] = useState(() => readStoredTheme());
   const fileInputRef = useRef(null);
-  const endRef = useRef(null);
+  const activeConversationRef = useRef('');
+  const actionLockRef = useRef(false);
+  const streamControllerRef = useRef(null);
+  const sessionRef = useRef(0);
 
-  const activeConversation = useMemo(
-    () => chatState.conversations.find((item) => item.id === chatState.activeConversationId) || chatState.conversations[0],
-    [chatState]
+  const activeProject = useMemo(
+    () => projects.find((project) => project.id === activeProjectId) || projects[0] || null,
+    [activeProjectId, projects]
   );
-  const hasStarted = activeConversation.messages.some((message) => message.role === "user");
+  const activeConversation = useMemo(
+    () => conversations.find((item) => item.id === activeConversationId) || conversations[0] || null,
+    [activeConversationId, conversations]
+  );
+  const activeDocument = useMemo(
+    () => documents.find((document) => document.id === activeDocumentId) || documents[0] || null,
+    [activeDocumentId, documents]
+  );
+  const annotations = activeConversation?.context?.annotations || [];
+  activeConversationRef.current = activeConversation?.id || '';
+  const resumeVariant = activeConversation?.context?.variant || activeConversation?.context?.formalResume || null;
 
   useEffect(() => {
-    saveChatState(window.localStorage, chatState);
-  }, [chatState]);
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [activeConversation.messages.length, pending]);
-
-  function addMessage(conversationId, role, content, extras = {}) {
-    setChatState((current) => appendMessage(current, conversationId, {
-      id: createId("message"),
-      role,
-      content,
-      kind: extras.kind || "text",
-      data: extras.data || null,
-      tone: extras.tone || "default",
-      createdAt: new Date().toISOString()
-    }));
-  }
-
-  function patchContext(conversationId, patch) {
-    setChatState((current) => updateConversationContext(current, conversationId, patch));
-  }
-
-  function createNewChat() {
-    const conversation = createConversation();
-    setChatState((current) => ({
-      ...current,
-      activeConversationId: conversation.id,
-      conversations: [conversation, ...current.conversations]
-    }));
-    setDraft("");
-    setSidebarOpen(false);
-  }
-
-  function selectConversation(conversationId) {
-    setChatState((current) => ({ ...current, activeConversationId: conversationId }));
-    setSidebarOpen(false);
-  }
-
-  function removeConversation(event, conversationId) {
-    event.stopPropagation();
-    setChatState((current) => deleteConversation(current, conversationId));
-  }
-
-  async function submitPrompt(nextPrompt = draft) {
-    const value = String(nextPrompt || "").trim();
-    if (!value || pending) return;
-
-    const conversationId = activeConversation.id;
-    const snapshot = activeConversation;
-    setDraft("");
-    addMessage(conversationId, "user", value);
-    setPending({ conversationId, label: "正在理解你的目标" });
-
-    try {
-      await runAgent(value, snapshot, conversationId);
-    } catch (error) {
-      addMessage(
-        conversationId,
-        "assistant",
-        "这一步没有完成：" + error.message + "。你可以稍后重试，之前的聊天和资料不会丢失。",
-        { kind: "error", tone: "warning" }
-      );
-    } finally {
-      setPending(null);
-    }
-  }
-
-  async function runAgent(input, conversation, conversationId) {
-    let context = { ...conversation.context };
-    const pastedMaterial = looksLikeResumeMaterial(input);
-    const pastedJd = looksLikeJobDescription(input);
-
-    if (pastedMaterial) {
-      context = { ...context, material: input };
-      patchContext(conversationId, { material: input });
-    }
-
-    if (pastedJd) {
-      const selectedJob = createJobFromDescription(input);
-      context = { ...context, selectedJob };
-      patchContext(conversationId, { selectedJob });
-      if (!/简历|优化|生成|面试|追问/.test(input)) {
-        addMessage(
-          conversationId,
-          "assistant",
-          "已把这份 JD 设为当前目标岗位。接下来可以直接让我生成岗位版简历。",
-          { kind: "target", data: { job: selectedJob } }
-        );
-        return;
-      }
-    }
-
-    const plan = planAgentAction(input, {
-      hasMaterial: Boolean(context.material),
-      hasProfile: Boolean(context.profile),
-      hasJob: Boolean(context.selectedJob),
-      hasVariant: Boolean(context.variant)
-    });
-
-    if (plan.action === "request-material" || plan.action === "request-resume" || plan.action === "none") {
-      addMessage(conversationId, "assistant", plan.message);
-      return;
-    }
-
-    if (plan.action === "analyze") {
-      await analyzeMaterial(conversationId, context.material || input, context);
-      return;
-    }
-
-    if (plan.action === "search-jobs") {
-      await searchJobs(conversationId, input, context);
-      return;
-    }
-
-    if (plan.action === "generate-resume") {
-      await generateResume(conversationId, context, input);
-      return;
-    }
-
-    if (plan.action === "prepare-interview") {
-      addMessage(
-        conversationId,
-        "assistant",
-        "我已经按当前岗位版整理了项目追问、技术主线和七天复习节奏。",
-        { kind: "interview", data: { plan: context.variant.interviewPlan } }
-      );
-      return;
-    }
-
-    addMessage(
-      conversationId,
-      "assistant",
-      "我是你的求职 Agent。把简历或 JD 直接发给我，或者告诉我想诊断简历、找岗位、生成岗位版、准备面试。我会在当前对话里完成，不需要切换页面。"
-    );
-  }
-
-  async function analyzeMaterial(conversationId, material, context) {
-    if (!material.trim()) {
-      addMessage(conversationId, "assistant", "请直接粘贴简历内容，或点击输入框左侧的附件按钮上传文件。");
-      return;
-    }
-    setPending({ conversationId, label: "正在分析职业资料" });
-    const result = await api("/api/intake/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text: material,
-        role: inferRole(material, context.selectedJob),
-        job: context.selectedJob
-      })
-    });
-    const diagnosis = result.completeness || result.diagnosis || {};
-    patchContext(conversationId, {
-      material,
-      profile: result.profile,
-      diagnosis
-    });
-    addMessage(
-      conversationId,
-      "assistant",
-      "资料分析完成。当前完整度 " + (diagnosis.completeness || 0) + "%，下面是最值得先处理的证据。",
-      {
-        kind: "diagnosis",
-        data: {
-          completeness: diagnosis.completeness || 0,
-          strengths: diagnosis.strengths || result.diagnosis?.strengths || [],
-          gaps: diagnosis.missing || diagnosis.gaps || result.diagnosis?.gaps || []
+    let alive = true;
+    async function boot() {
+      try {
+        const [me, settings] = await Promise.all([
+          requestJson("/api/auth/me"),
+          requestJson("/api/model-settings").catch(() => ({ settings: modelSettings }))
+        ]);
+        if (!alive) return;
+        setUser(me.user || null);
+        setModelSettings(settings.settings || modelSettings);
+        if (me.user) {
+          await loadWorkspace(alive);
+          if (window.location.hash === "#workspace") setView("workspace");
         }
+      } catch (error) {
+        if (alive) setNotice(error.message);
+      } finally {
+        if (alive) setBooting(false);
       }
-    );
-  }
-
-  async function searchJobs(conversationId, input, context) {
-    setPending({ conversationId, label: "正在匹配目标岗位" });
-    const queries = buildJobQueries(input, context.profile);
-    let result = { jobs: [] };
-    let matchedQuery = queries[0];
-    for (const query of queries) {
-      const params = new URLSearchParams({ type: inferJobType(input), query });
-      result = await api("/api/jobs/library?" + params.toString());
-      matchedQuery = query;
-      if (result.jobs?.length) break;
     }
-    const jobs = [...(result.jobs || [])]
-      .sort((left, right) => (right.opportunityScore || right.matchScore || 0) - (left.opportunityScore || left.matchScore || 0))
-      .slice(0, 4);
-    patchContext(conversationId, { jobs });
-    addMessage(
-      conversationId,
-      "assistant",
-      jobs.length
-        ? "找到 " + jobs.length + " 个优先候选。选择一个目标岗位后，我会在后续消息里一直使用这份 JD。"
-        : "暂时没有找到匹配岗位。可以换一个方向或更具体的关键词再试一次。",
-      { kind: "jobs", data: { jobs, query: matchedQuery } }
-    );
+    boot();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeConversation?.id) {
+      setDocuments([]);
+      return;
+    }
+    setDocuments([]);
+    refreshDocuments(activeConversation.id);
+  }, [activeConversation?.id]);
+
+  async function loadWorkspace(alive = true) {
+    const [projectResult, conversationResult] = await Promise.all([
+      requestJson("/api/projects"),
+      requestJson("/api/conversations")
+    ]);
+    if (!alive) return;
+    const nextProjects = projectResult.projects || [];
+    const nextConversations = conversationResult.conversations || [];
+    setProjects(nextProjects);
+    setConversations(nextConversations);
+    setActiveProjectId((current) => nextProjects.some((project) => project.id === current) ? current : nextProjects[0]?.id || "");
+    setActiveConversationId((current) => nextConversations.some((conversation) => conversation.id === current) ? current : nextConversations[0]?.id || "");
   }
 
-  async function generateResume(conversationId, context, input) {
-    setPending({ conversationId, label: "正在生成岗位版简历" });
-    const role = inferRole(input, context.selectedJob);
-    const jd = [
-      context.selectedJob?.description,
-      ...(context.selectedJob?.requirements || [])
-    ].filter(Boolean).join("\n");
-    const result = await api("/api/resume/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        profile: context.profile,
-        role,
-        template: role === "product" || role === "ops" ? "productOps" : "aiResearch",
-        jd
-      })
-    });
-    patchContext(conversationId, { variant: result.variant });
-    addMessage(
-      conversationId,
-      "assistant",
-      "岗位版已经生成，匹配度 " + result.variant.fitScore + "/100。每一条改写都保留了可追问的项目证据。",
-      { kind: "resume", data: { variant: result.variant } }
-    );
+  async function refreshDocuments(conversationId) {
+    try {
+      const result = await requestJson(`/api/conversations/${encodeURIComponent(conversationId)}/documents`);
+      if (activeConversationRef.current !== conversationId) return;
+      const next = (result.documents || []).map(doc=>({...doc,name:readableDocumentName(doc.name)}));
+      setDocuments(next);
+      setActiveDocumentId((current) => next.some((document) => document.id === current) ? current : next[0]?.id || "");
+    } catch {
+      if (activeConversationRef.current !== conversationId) return;
+      setDocuments([]);
+      setActiveDocumentId("");
+    }
   }
 
-  async function selectJob(conversationId, job) {
-    patchContext(conversationId, { selectedJob: job, variant: null });
-    addMessage(
-      conversationId,
-      "assistant",
-      "已选择「" + job.company + " · " + job.title + "」作为目标岗位。现在可以让我生成岗位版简历。",
-      { kind: "target", data: { job } }
-    );
+  function enterWorkspace() {
+    if (!user) {
+      setAuthMode("login");
+      setAuthVisible(true);
+      setNotice("登录后进入工作区，简历和对话会保存到你的账户。");
+      return;
+    }
+    window.location.hash = "workspace";
+    setView("workspace");
+  }
+
+  async function submitAuth(event) {
+    event.preventDefault();
+    setNotice("");
+    const form = new FormData(event.currentTarget);
+    const payload = {
+      email: String(form.get("email") || "").trim(),
+      password: String(form.get("password") || "")
+    };
+    if (authMode === "register") payload.name = String(form.get("name") || "").trim();
+    if (authMode === "register" && payload.password.length < 10) {
+      setNotice("密码至少需要 10 位。");
+      return;
+    }
+    try {
+      const result = await requestJson(AUTH_ENDPOINTS[authMode], {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      setUser(result.user);
+      setAuthVisible(false);
+      await loadWorkspace();
+      window.location.hash = "workspace";
+      setView("workspace");
+    } catch (error) {
+      setNotice(error.message);
+    }
+  }
+
+  async function logout() {
+    sessionRef.current += 1;
+    streamControllerRef.current?.abort();
+    actionLockRef.current = false;
+    setPending(null);
+    try {
+      await requestJson("/api/auth/logout", { method: "POST" });
+      setUser(null);
+      setProjects([]);
+      setConversations([]);
+      setDocuments([]);
+      setActiveProjectId("");
+      setActiveConversationId("");
+      setActiveDocumentId("");
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      setView("landing");
+      setNotice("");
+    } catch (error) {
+      setNotice(error.message);
+    }
+  }
+
+  async function saveProjectName(event) {
+    event.preventDefault();
+    const name = String(new FormData(event.currentTarget).get("name") || "").trim();
+    if (!name) {
+      setNotice("请输入项目名称。");
+      return;
+    }
+    try {
+      if (projectEditor?.project?.id) {
+        const result = await requestJson(`/api/projects/${encodeURIComponent(projectEditor.project.id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name })
+        });
+        setProjects((current) => current.map((item) => item.id === result.project.id ? result.project : item));
+      } else {
+        const result = await requestJson("/api/projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name })
+        });
+        setProjects((current) => [result.project, ...current]);
+        setActiveProjectId(result.project.id);
+      }
+      setProjectEditor(null);
+    } catch (error) {
+      setNotice(error.message);
+    }
+  }
+
+  async function deleteProject(projectId) {
+    try {
+      await requestJson(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+      const remaining = projects.filter((project) => project.id !== projectId);
+      setProjects(remaining);
+      setActiveProjectId(remaining[0]?.id || "");
+    } catch (error) {
+      setNotice(error.message);
+    }
+  }
+
+  async function createConversation() {
+    if (!user) {
+      setAuthMode("login");
+      setAuthVisible(true);
+      return null;
+    }
+    try {
+      const result = await requestJson("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: activeProject?.id || activeProjectId || null })
+      });
+      setConversations((current) => [result.conversation, ...current]);
+      setActiveConversationId(result.conversation.id);
+      setSidebarOpen(false);
+      return result.conversation;
+    } catch (error) {
+      setNotice(error.message);
+      return null;
+    }
+  }
+
+  async function patchConversation(conversationId, patch) {
+    try {
+      const result = await requestJson(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch)
+      });
+      replaceConversation(result.conversation);
+    } catch (error) {
+      setNotice(error.message);
+    }
+  }
+
+  async function deleteConversation(conversationId) {
+    try {
+      await requestJson(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
+      const remaining = conversations.filter((item) => item.id !== conversationId);
+      setConversations(remaining);
+      if (activeConversationId === conversationId) setActiveConversationId(remaining[0]?.id || "");
+    } catch (error) {
+      setNotice(error.message);
+    }
+  }
+
+  async function ensureConversation() {
+    if (activeConversation) return activeConversation;
+    return createConversation();
+  }
+
+  async function submitPrompt(nextPrompt = '') {
+    const content = String(nextPrompt || "").trim();
+    if (!content || pending || actionLockRef.current) return;
+    if (!user) {
+      setAuthMode("login");
+      setAuthVisible(true);
+      return;
+    }
+    actionLockRef.current = true;
+    const session = sessionRef.current;
+    const controller = new AbortController();
+    streamControllerRef.current = controller;
+    setNotice("");
+    let conversation;
+    let errorConversationReconciled = false;
+    try {
+      conversation = await ensureConversation();
+      if (!conversation || session !== sessionRef.current) return;
+      appendLocalMessage(conversation.id, {
+        id: `local-${Date.now()}`,
+        role: "user",
+        content,
+        kind: "text",
+        createdAt: new Date().toISOString()
+      });
+      setPending({ conversationId: conversation.id, label: "正在分析资料" });
+      const done = await streamConversationMessage(conversation.id, content, {
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (session !== sessionRef.current) return;
+          if (event.type === "status") setPending({ conversationId: conversation.id, label: event.label, tool: event.tool });
+          if (event.type === "message") appendLocalMessage(conversation.id, scrubAssistantMessage(event.message));
+          if (event.type === "done" && event.conversation) replaceConversation(scrubConversation(event.conversation));
+          if (event.type === "error" && event.conversation) {
+            errorConversationReconciled = true;
+            replaceConversation(scrubConversation(event.conversation));
+          }
+        }
+      });
+      if (done && session === sessionRef.current) replaceConversation(scrubConversation(done));
+      if (conversation.id) refreshDocuments(conversation.id);
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      if (conversation && !errorConversationReconciled) {
+        appendLocalMessage(conversation.id, {
+          id: `error-${Date.now()}`,
+          role: "assistant",
+          content: "这一步没有完成：" + error.message,
+          kind: "error",
+          tone: "warning",
+          createdAt: new Date().toISOString()
+        });
+      } else {
+        setNotice(error.message);
+      }
+    } finally {
+      if (streamControllerRef.current === controller) streamControllerRef.current = null;
+      actionLockRef.current = false;
+      if (session === sessionRef.current) setPending(null);
+    }
+  }
+
+  async function cancelPrompt() {
+    const conversationId = pending?.conversationId;
+    streamControllerRef.current?.abort();
+    if (!conversationId) return;
+    setNotice('已停止生成，已完成的内容仍保留。');
+    try {
+      const result = await requestJson(`/api/conversations/${encodeURIComponent(conversationId)}`);
+      if (result.conversation) replaceConversation(scrubConversation(result.conversation));
+    } catch { /* The local transcript remains available if reconciliation fails. */ }
+  }
+
+  async function selectJob(job) {
+    if (pending || actionLockRef.current) return;
+    if (!activeConversation) return;
+    try {
+      const result = await requestJson(`/api/conversations/${encodeURIComponent(activeConversation.id)}/context`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selectedJob: job })
+      });
+      replaceConversation(scrubConversation(result.conversation));
+    } catch (error) {
+      setNotice(error.message);
+    }
   }
 
   async function handleFile(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || pending) return;
-    const conversationId = activeConversation.id;
-    addMessage(conversationId, "user", "上传了简历文件：" + file.name, {
-      kind: "attachment",
-      data: { filename: file.name }
-    });
-    setPending({ conversationId, label: "正在读取 " + file.name });
+    if (pending || actionLockRef.current || !file) return;
+    const validation = validateResumeFile(file);
+    if (!validation.ok) {
+      setNotice(validation.error);
+      return;
+    }
+    if (!user) {
+      setAuthMode("login");
+      setAuthVisible(true);
+      return;
+    }
+    actionLockRef.current = true;
+    const session = sessionRef.current;
+    let conversation;
     try {
+      conversation = await ensureConversation();
+      if (!conversation || session !== sessionRef.current) return;
       const form = new FormData();
       form.append("file", file);
-      const result = await api("/api/profile/upload", { method: "POST", body: form });
-      const diagnosis = result.diagnosis || {};
-      patchContext(conversationId, {
-        material: result.normalizedText || "",
-        profile: result.profile,
-        diagnosis
+      setPending({ conversationId: conversation.id, label: "正在读取 " + file.name });
+      const result = await requestJson(`/api/conversations/${encodeURIComponent(conversation.id)}/documents`, {
+        method: "POST",
+        body: form,
+        timeoutMs: 250_000
       });
-      addMessage(
-        conversationId,
-        "assistant",
-        "文件读取完成。资料完整度 " + (diagnosis.completeness || 0) + "%，我已经保留这份画像供后续岗位和简历任务使用。",
-        {
-          kind: "diagnosis",
-          data: {
-            completeness: diagnosis.completeness || 0,
-            strengths: diagnosis.strengths || [],
-            gaps: diagnosis.gaps || []
-          }
-        }
-      );
+      if (session === sessionRef.current) {
+        replaceConversation(scrubConversation(result.conversation));
+        await refreshDocuments(conversation.id);
+      }
     } catch (error) {
-      addMessage(conversationId, "assistant", "文件没有读取成功：" + error.message, {
-        kind: "error",
-        tone: "warning"
-      });
+      setNotice(error.message);
     } finally {
-      setPending(null);
+      actionLockRef.current = false;
+      if (session === sessionRef.current) setPending(null);
     }
   }
 
-  return (
-    <div className="chat-shell" data-sidebar-open={sidebarOpen}>
-      <button
-        className="sidebar-scrim"
-        type="button"
-        aria-label="关闭会话列表"
-        onClick={() => setSidebarOpen(false)}
-      />
-      <ConversationSidebar
-        conversations={chatState.conversations}
-        activeConversationId={activeConversation.id}
-        onNew={createNewChat}
-        onSelect={selectConversation}
-        onDelete={removeConversation}
-        onClose={() => setSidebarOpen(false)}
-      />
+  async function importLegacy() {
+    try {
+      const result = await importLocalConversations(window.localStorage, requestJson);
+      await loadWorkspace();
+      const count = result.count ?? result.imported ?? 0;
+      setNotice(count ? `已导入 ${count} 条旧会话。` : "没有找到可导入的旧本地会话。");
+    } catch (error) {
+      setNotice(error.message);
+    }
+  }
 
-      <main className={"conversation-stage" + (hasStarted ? " has-messages" : " is-empty")}>
-        <ChatHeader
-          conversation={activeConversation}
-          onMenu={() => setSidebarOpen(true)}
-          onNew={createNewChat}
-        />
+  async function saveSettings(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const mode = form.get("mode") === "custom" ? "custom" : "default";
+    const payload = { mode };
+    if (mode === "custom") {
+      payload.protocol = form.get("protocol");
+      payload.baseUrl = String(form.get("baseUrl") || "").trim();
+      payload.model = String(form.get("model") || "").trim();
+      const apiKey = String(form.get("apiKey") || "").trim();
+      if (apiKey) payload.apiKey = apiKey;
+    }
+    try {
+      const result = await requestJson("/api/model-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      setModelSettings(result.settings);
+      setSettingsVisible(false);
+      setNotice("模型设置已保存。");
+    } catch (error) {
+      setNotice(error.message);
+    }
+  }
 
-        {!hasStarted ? (
-          <WelcomeState
-            onPrompt={submitPrompt}
-            videoFailed={videoFailed}
-            onVideoError={() => setVideoFailed(true)}
-          />
-        ) : (
-          <MessageStream
-            conversation={activeConversation}
-            pending={pending?.conversationId === activeConversation.id ? pending : null}
-            onSelectJob={(job) => selectJob(activeConversation.id, job)}
-            endRef={endRef}
-          />
-        )}
+  function appendLocalMessage(conversationId, message) {
+    setConversations((current) => current.map((conversation) => (
+      conversation.id === conversationId
+        ? { ...conversation, messages: [...(conversation.messages || []), message], updatedAt: message.createdAt || conversation.updatedAt }
+        : conversation
+    )));
+  }
 
-        <ChatComposer
-          draft={draft}
-          onDraft={setDraft}
-          onSubmit={submitPrompt}
-          onAttach={() => fileInputRef.current?.click()}
-          disabled={Boolean(pending)}
-        />
-        <input
-          ref={fileInputRef}
-          className="visually-hidden"
-          type="file"
-          accept=".pdf,.doc,.docx,.txt"
-          onChange={handleFile}
-          aria-label="上传简历文件"
-        />
-      </main>
-    </div>
-  );
-}
+  function replaceConversation(conversation) {
+    setConversations((current) => {
+      const exists = current.some((item) => item.id === conversation.id);
+      return exists
+        ? current.map((item) => item.id === conversation.id ? conversation : item)
+        : [conversation, ...current];
+    });
+  }
 
-function ConversationSidebar({ conversations, activeConversationId, onNew, onSelect, onDelete, onClose }) {
-  const sorted = [...conversations].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  return (
-    <aside className="conversation-sidebar" aria-label="聊天记录">
-      <div className="sidebar-brand">
-        <div className="brand-glyph"><Sparkles size={16} /></div>
-        <div><strong>Resume Protocol</strong><span>Career Agent</span></div>
-        <button type="button" onClick={onClose} className="sidebar-close" aria-label="关闭会话列表"><X size={18} /></button>
-      </div>
-      <button className="new-chat-button" type="button" onClick={onNew}>
-        <Plus size={17} />新对话
-      </button>
-      <div className="history-label"><span>聊天记录</span><span>{conversations.length}</span></div>
-      <nav className="conversation-history">
-        {sorted.map((conversation) => (
-          <div key={conversation.id} className={"history-row" + (conversation.id === activeConversationId ? " active" : "")}>
-            <button type="button" className="history-item" onClick={() => onSelect(conversation.id)}>
-              <MessageSquareText size={15} />
-              <span><strong>{conversation.title}</strong><small>{formatRelativeTime(conversation.updatedAt)}</small></span>
-            </button>
-            <button
-              type="button"
-              className="history-delete"
-              aria-label={"删除会话 " + conversation.title}
-              onClick={(event) => onDelete(event, conversation.id)}
-            ><Trash2 size={14} /></button>
-          </div>
-        ))}
-      </nav>
-      <div className="sidebar-foot">
-        <div><span className="status-dot" />本地保存</div>
-        <p>聊天与职业上下文仅保存在当前浏览器。</p>
-      </div>
-    </aside>
-  );
-}
-
-function ChatHeader({ conversation, onMenu, onNew }) {
-  const context = conversation.context;
-  const states = [
-    ["资料", Boolean(context.profile)],
-    ["目标", Boolean(context.selectedJob)],
-    ["岗位版", Boolean(context.variant)]
-  ];
-  return (
-    <header className="chat-header">
-      <button className="mobile-menu-button" type="button" onClick={onMenu} aria-label="打开聊天记录"><Menu size={19} /></button>
-      <div className="header-title">
-        <span>Career Agent</span>
-        <ChevronDown size={14} />
-      </div>
-      <div className="context-state" aria-label="当前上下文状态">
-        {states.map(([label, ready]) => (
-          <span className={ready ? "ready" : ""} key={label}>
-            {ready ? <CheckCircle2 size={13} /> : <Circle size={13} />}{label}
-          </span>
-        ))}
-      </div>
-      <button className="header-new-chat" type="button" onClick={onNew}><Plus size={16} /><span>新对话</span></button>
-    </header>
-  );
-}
-
-function WelcomeState({ onPrompt, videoFailed, onVideoError }) {
-  return (
-    <section className={"welcome-state" + (videoFailed ? " video-failed" : "")}>
-      <video
-        className="welcome-video"
-        src={VIDEO_URL}
-        autoPlay
-        loop
-        muted
-        playsInline
-        preload="metadata"
-        aria-hidden="true"
-        onCanPlay={(event) => event.currentTarget.play().catch(() => {})}
-        onError={onVideoError}
-      />
-      <div className="welcome-wash" aria-hidden="true" />
-      <div className="welcome-content">
-        <div className="agent-mark"><Bot size={22} /></div>
-        <p className="welcome-kicker">RESUME PROTOCOL / AGENT 01</p>
-        <h1>今天想推进哪一步？</h1>
-        <p className="welcome-copy">把简历、JD 或目标直接发过来。Agent 会记住当前对话里的资料，并调用对应能力完成任务。</p>
-        <div className="quick-prompts">
-          {QUICK_PROMPTS.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button key={item.label} type="button" onClick={() => onPrompt(item.prompt)}>
-                <Icon size={18} />
-                <span><strong>{item.label}</strong><small>{item.description}</small></span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function MessageStream({ conversation, pending, onSelectJob, endRef }) {
-  return (
-    <section className="message-scroll" aria-label="对话内容">
-      <div className="message-stream" role="log" aria-live="polite">
-        {conversation.messages.map((message) => (
-          <ChatMessage key={message.id} message={message} context={conversation.context} onSelectJob={onSelectJob} />
-        ))}
-        {pending ? (
-          <div className="message-row assistant pending-message">
-            <AgentAvatar />
-            <div className="message-body"><LoaderCircle className="spin" size={17} /><span>{pending.label}</span></div>
-          </div>
-        ) : null}
-        <div ref={endRef} />
-      </div>
-    </section>
-  );
-}
-
-function ChatMessage({ message, context, onSelectJob }) {
-  if (message.role === "user") {
+  if (view === "landing") {
     return (
-      <div className="message-row user">
-        <div className="user-bubble">
-          {message.kind === "attachment" ? <FileText size={16} /> : null}
-          <p>{message.content}</p>
-        </div>
-      </div>
+      <>
+        <LandingPage
+          booting={booting}
+          user={user}
+          onLogin={() => { setAuthMode("login"); setAuthVisible(true); }}
+          onRegister={() => { setAuthMode("register"); setAuthVisible(true); }}
+          onStart={enterWorkspace}
+        />
+        <AuthPanel
+          mode={authMode}
+          visible={authVisible}
+          notice={notice}
+          onMode={setAuthMode}
+          onClose={() => setAuthVisible(false)}
+          onSubmit={submitAuth}
+        />
+      </>
     );
   }
 
   return (
-    <div className={"message-row assistant " + (message.tone || "")}>
-      <AgentAvatar />
-      <div className="message-body">
-        <p>{message.content}</p>
-        <MessageResult message={message} context={context} onSelectJob={onSelectJob} />
-      </div>
+    <div className="workspace-shell aui-workspace" data-theme={theme} data-sidebar-open={sidebarOpen} data-panel-open={panelOpen} data-sidebar-collapsed={sidebarCollapsed}>
+      <MobileBar
+        theme={theme}
+        onMenu={() => setSidebarOpen(true)}
+        onPanel={() => setPanelOpen(true)}
+        onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+      />
+      <ProjectSidebar
+        user={user}
+        projects={projects}
+        activeProjectId={activeProject?.id || ""}
+        conversations={conversations}
+        activeConversationId={activeConversation?.id || ""}
+        collapsed={sidebarCollapsed}
+        notice={notice}
+        onCollapse={() => setSidebarCollapsed((value) => !value)}
+        onProject={setActiveProjectId}
+        onCreateProject={() => setProjectEditor({ project: null })}
+        onRenameProject={(project) => setProjectEditor({ project })}
+        onDeleteProject={deleteProject}
+        onNewConversation={createConversation}
+        onSelectConversation={(id) => { setActiveConversationId(id); setSidebarOpen(false); }}
+        onMoveConversation={(conversationId, projectId) => patchConversation(conversationId, { projectId })}
+        onDeleteConversation={deleteConversation}
+        onImport={importLegacy}
+        onSettings={() => setSettingsVisible(true)}
+        onLogout={logout}
+        onClose={() => setSidebarOpen(false)}
+      />
+      <main className="workspace-chat">
+        <ChatHeader
+          onSidebar={() => setSidebarCollapsed(value=>!value)}
+          onPanel={() => setPanelOpen(value=>!value)}
+          panelOpen={panelOpen}
+          project={activeProject}
+          conversation={activeConversation}
+          theme={theme}
+          onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+          onTitle={(title) => activeConversation && patchConversation(activeConversation.id, { title })}
+        />
+        <React.Suspense fallback={<div role="status">正在打开工作区…</div>}><WorkspaceChat
+          key={activeConversation?.id || 'new'}
+          conversation={activeConversation}
+          documents={documents}
+          pending={pending?.conversationId === activeConversation?.id ? pending : null}
+          busy={Boolean(pending)}
+          canCancel={Boolean(pending?.conversationId === activeConversation?.id && streamControllerRef.current)}
+          onSend={submitPrompt}
+          onCancel={cancelPrompt}
+          onAttach={() => fileInputRef.current?.click()}
+          onSelectJob={selectJob}
+          onOpenPreview={() => setPanelOpen(true)}
+          renderAttachment={(message, items) => <AttachmentStatus message={message} documents={items} />}
+          scrubMessage={scrubAssistantMessage}
+          notice={notice}
+          onDismissNotice={() => setNotice('')}
+        /></React.Suspense>
+        <input
+          ref={fileInputRef}
+          className="visually-hidden"
+          type="file"
+          accept=".pdf,.docx,.txt,.md,.json"
+          disabled={Boolean(pending)}
+          onChange={handleFile}
+          aria-label="上传简历文件"
+        />
+      </main>
+      {panelOpen && <EvidencePanel
+        conversation={activeConversation}
+        documents={documents}
+        activeDocument={activeDocument}
+        annotations={annotations}
+        variant={resumeVariant}
+        onDocument={setActiveDocumentId}
+        onClose={() => setPanelOpen(false)}
+        onPrompt={submitPrompt}
+      />}
+      <SettingsPanel
+        visible={settingsVisible}
+        settings={modelSettings}
+        onClose={() => setSettingsVisible(false)}
+        onSubmit={saveSettings}
+      />
+      <ProjectEditor
+        editor={projectEditor}
+        onClose={() => setProjectEditor(null)}
+        onSubmit={saveProjectName}
+      />
     </div>
   );
 }
 
-function AgentAvatar() {
-  return <div className="agent-avatar"><Bot size={16} /></div>;
-}
-
-function MessageResult({ message, context, onSelectJob }) {
-  const data = message.data || {};
-  if (message.kind === "diagnosis") return <DiagnosisResult data={data} />;
-  if (message.kind === "jobs") return <JobsResult jobs={data.jobs || []} selectedJob={context.selectedJob} onSelect={onSelectJob} />;
-  if (message.kind === "resume") return <ResumeResult variant={data.variant} />;
-  if (message.kind === "interview") return <InterviewResult plan={data.plan} />;
-  if (message.kind === "target") return <TargetResult job={data.job} />;
-  if (message.kind === "error") return <div className="inline-error">上下文已保留，可以重新发送这条指令。</div>;
-  return null;
-}
-
-function DiagnosisResult({ data }) {
+function LandingPage({ booting, user, onLogin, onRegister, onStart }) {
   return (
-    <div className="result-card diagnosis-card">
-      <header><span>资料诊断</span><strong>{data.completeness || 0}<small>%</small></strong></header>
-      <ResultList title="已有优势" items={data.strengths} positive />
-      <ResultList title="优先补齐" items={data.gaps} />
+    <div className="landing-page">
+      <nav className="landing-nav">
+        <div className="landing-logo">Resume Protocol<sup>®</sup></div>
+        <div className="landing-links">
+          <a href="#home">首页</a>
+          <button type="button" onClick={onStart}>工作区</button>
+          <a href="#how-it-works">使用方法</a>
+        </div>
+        <div className="landing-actions">
+          {user ? <button type="button" onClick={onStart}>Enter Workspace</button> : <><button type="button" onClick={onLogin}>登录</button><button type="button" onClick={onRegister}>注册</button></>}
+        </div>
+      </nav>
+      <section className="landing-hero" id="home">
+        <video
+          className="landing-video"
+          src={LANDING_VIDEO_URL}
+          autoPlay
+          muted
+          playsInline
+          preload="auto"
+          loop={false}
+          onEnded={(event) => event.currentTarget.pause()}
+          aria-hidden="true"
+        />
+        <div className="landing-copy">
+          <h1>Build resumes,<br />prove the work.</h1>
+          <p>把真实经历整理成可信证据，再生成面向岗位的简历、批注和面试准备。</p>
+          <button type="button" onClick={onStart}>{booting ? "Loading" : "Get Started"}</button>
+        </div>
+      </section>
+      <section className="landing-info" id="how-it-works" aria-label="How Resume Protocol helps">
+        <div className="info-copy">
+          <div>
+            <span>How do we help?</span>
+            <h2>Evidence that<br />moves forward</h2>
+          </div>
+          <p>Resume Protocol 把简历、岗位和对话放在同一个工作区。每一次改写都连接原始资料、AI 证据批注和可下载优化稿。</p>
+        </div>
+        <div className="info-divider" />
+        <div className="info-pills">
+          {["Resume Diagnosis", "Job Alignment", "Interview Proof"].map((label, index) => (
+            <button key={label} type="button"><span>{String(index + 1).padStart(2, "0")}</span><b>/</b>{label}<ChevronRight size={16} /></button>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
 
-function JobsResult({ jobs, selectedJob, onSelect }) {
-  if (!jobs.length) return null;
+function MobileBar({ theme, onMenu, onPanel, onTheme }) {
   return (
-    <div className="result-card jobs-card">
-      <header><span>岗位候选</span><small>选择后写入当前对话上下文</small></header>
-      <div className="job-list">
-        {jobs.map((job) => {
-          const selected = selectedJob?.id === job.id;
-          return (
-            <button key={job.id} type="button" className={selected ? "selected" : ""} onClick={() => onSelect(job)}>
-              <span className="job-icon"><BriefcaseBusiness size={16} /></span>
-              <span className="job-main">
-                <strong>{job.title}</strong>
-                <small>{job.company || "招聘团队"} · {job.location || "地点待确认"}</small>
-              </span>
-              <span className="job-score">{job.opportunityScore || job.matchScore || "--"}</span>
-              <span className="job-action">{selected ? <><Check size={14} />已选择</> : "选择"}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <header className="mobile-bar">
+      <button type="button" onClick={onMenu} aria-label="打开项目目录"><Menu size={19} /></button>
+      <strong>Resume Protocol</strong>
+      <button type="button" onClick={onTheme} className="theme-toggle" aria-label="切换亮暗模式">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
+      <button type="button" onClick={onPanel} aria-label="打开证据面板"><FileText size={18} /></button>
+    </header>
   );
 }
 
-function ResumeResult({ variant }) {
-  if (!variant) return null;
+function ProjectSidebar({
+  user,
+  projects,
+  activeProjectId,
+  conversations,
+  activeConversationId,
+  collapsed,
+  notice,
+  onCollapse,
+  onProject,
+  onCreateProject,
+  onRenameProject,
+  onDeleteProject,
+  onNewConversation,
+  onSelectConversation,
+  onMoveConversation,
+  onDeleteConversation,
+  onImport,
+  onSettings,
+  onLogout,
+  onClose
+}) {
+  const activeConversations = conversations.filter((conversation) => !activeProjectId || conversation.projectId === activeProjectId);
   return (
-    <div className="result-card resume-card">
-      <header>
-        <div><span>岗位版简历</span><h3>{variant.title}</h3></div>
-        <strong>{variant.fitScore}<small>/100</small></strong>
-      </header>
-      <p className="resume-summary">{variant.summary}</p>
-      <div className="skill-row">{(variant.skills || []).slice(0, 8).map((skill) => <span key={skill}>{skill}</span>)}</div>
-      <div className="project-output">
-        {(variant.projects || []).slice(0, 3).map((project, index) => (
-          <div key={project}><span>0{index + 1}</span><p>{project}</p></div>
-        ))}
-      </div>
-      <footer><WandSparkles size={14} />已同步生成面试追问</footer>
-    </div>
-  );
-}
-
-function InterviewResult({ plan }) {
-  if (!plan) return null;
-  return (
-    <div className="result-card interview-card">
-      <header><span>面试准备</span><small>{plan.roleLabel}</small></header>
-      <div className="topic-row">
-        {(plan.technicalTopics || []).slice(0, 4).map((topic) => (
-          <span key={topic.id}><b>{topic.priority}</b>{topic.title}</span>
-        ))}
-      </div>
-      <div className="interview-columns">
-        <section>
-          <h3>项目追问</h3>
-          {(plan.resumeDefense || []).slice(0, 4).map((question) => <p key={question}>{question}</p>)}
+    <>
+      <button className="mobile-drawer sidebar-drawer" type="button" aria-label="关闭项目目录" onClick={onClose} />
+      <aside className="project-sidebar">
+        <header>
+          <button type="button" onClick={onCollapse} aria-label={collapsed ? "展开项目目录" : "收起项目目录"}>{collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}</button>
+          <strong>Resume Protocol</strong>
+          <button type="button" onClick={onClose} className="drawer-close" aria-label="关闭项目目录"><X size={18} /></button>
+        </header>
+        <button className="primary-action" type="button" onClick={onNewConversation}><Plus size={17} /><span>新会话</span></button>
+        <section className="sidebar-section">
+          <div className="section-title"><span>项目</span><button type="button" onClick={onCreateProject} aria-label="新建项目"><Plus size={14} /></button></div>
+          <div className="project-list">
+            {projects.map((project) => (
+              <div key={project.id} className={"project-row" + (project.id === activeProjectId ? " active" : "")}>
+                <button type="button" onClick={() => onProject(project.id)}><Folder size={15} /><span>{project.name || "未命名项目"}</span></button>
+                <button type="button" onClick={() => onRenameProject(project)} aria-label="重命名项目"><Settings size={13} /></button>
+                <button type="button" onClick={() => onDeleteProject(project.id)} aria-label="删除项目"><Trash2 size={13} /></button>
+              </div>
+            ))}
+          </div>
         </section>
-        <section>
-          <h3>七天节奏</h3>
-          {(plan.schedule || []).slice(0, 7).map((item) => (
-            <p key={item.day}><b>{item.day}</b><span>{item.title}</span></p>
+        <section className="sidebar-section conversation-tree">
+          <div className="section-title"><span>会话</span></div>
+          {activeConversations.map((conversation) => (
+            <div key={conversation.id} className={"conversation-row" + (conversation.id === activeConversationId ? " active" : "")}>
+              <button type="button" onClick={() => onSelectConversation(conversation.id)}>
+                <MessageSquareText size={15} />
+                <span>{conversation.title || "新会话"}</span>
+              </button>
+              {projects.length > 0 && <select value={conversation.projectId || ""} onChange={(event) => onMoveConversation(conversation.id, event.target.value || null)} aria-label="移动会话到项目">
+                <option value="">未归档</option>
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>}
+              <button type="button" onClick={() => onDeleteConversation(conversation.id)} aria-label="删除会话"><Trash2 size={13} /></button>
+            </div>
           ))}
         </section>
+        {notice ? <p className="sidebar-notice">{notice}</p> : null}
+        <footer>
+          <button type="button" onClick={onImport}><Upload size={15} /><span>导入旧记录</span></button>
+          <button type="button" onClick={onSettings}><Settings size={15} /><span>设置</span></button>
+          <button type="button" onClick={onLogout}><LogOut size={15} /><span>{user?.name || user?.email || "账户"}</span></button>
+        </footer>
+      </aside>
+    </>
+  );
+}
+
+function ChatHeader({ project, conversation, theme, onTheme, onTitle, onSidebar, onPanel, panelOpen }) {
+  const [titleDraft, setTitleDraft] = useState(conversation?.title || "新会话");
+  useEffect(() => {
+    setTitleDraft(conversation?.title || "新会话");
+  }, [conversation?.id, conversation?.title]);
+  function commitTitle() {
+    const title = titleDraft.trim();
+    if (conversation && title && title !== conversation.title) onTitle(title);
+  }
+  return (
+    <header className="chat-header">
+      <button type="button" className="header-icon" onClick={onSidebar} aria-label="切换项目目录" title="切换项目目录 (Ctrl+B)"><PanelLeft size={19}/></button>
+      <div>
+        <span>{project?.name || "未归档项目"}</span>
+        <input
+          value={titleDraft}
+          onChange={(event) => setTitleDraft(event.target.value)}
+          onBlur={commitTitle}
+          onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+          aria-label="会话标题"
+          disabled={!conversation}
+        />
       </div>
-    </div>
+      <nav className="chat-tools">
+        <button type="button" className="header-icon" onClick={onTheme} aria-label={theme === 'dark' ? '亮色' : '暗色'} title="切换亮暗模式">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
+        <button type="button" className="header-icon" onClick={onPanel} aria-label="打开简历预览" aria-expanded={panelOpen} title="简历预览"><PanelRight size={19}/></button>
+      </nav>
+    </header>
   );
 }
 
-function TargetResult({ job }) {
-  if (!job) return null;
+function AttachmentStatus({ message, documents = [] }) {
+  const fileName = message.data?.filename || "上传文件";
+  const documentId = message.data?.documentId;
+  const documentStatus = documents.find((document) => document.id === documentId)?.parseStatus;
+  const parseStatus = message.data?.parseStatus || message.data?.status || documentStatus || null;
+  const state = parseStatus?.status || "unknown";
   return (
-    <div className="target-card">
-      <span><BriefcaseBusiness size={15} />当前目标</span>
-      <strong>{job.company} · {job.title}</strong>
-    </div>
-  );
-}
-
-function ResultList({ title, items = [], positive = false }) {
-  const normalizedItems = normalizeResultItems(items);
-  if (!normalizedItems.length) return null;
-  return (
-    <section className={"result-list" + (positive ? " positive" : "")}>
-      <h3>{title}</h3>
-      {normalizedItems.slice(0, 4).map((item) => <p key={item}><span>{positive ? <Check size={12} /> : "→"}</span>{item}</p>)}
+    <section className={`attachment-status ${state}`} aria-label="上传文件状态">
+      <div className="attachment-icon"><FileText size={16} /></div>
+      <div>
+        <strong>{fileName}</strong>
+        <p>{attachmentStatusText(parseStatus)}</p>
+      </div>
+      <span className="attachment-chip">{attachmentStatusBadge(state)}</span>
+      <a className="document-link" href={`/api/documents/${encodeURIComponent(documentId)}`}><Download size={14} />原文件</a>
     </section>
   );
 }
 
-function ChatComposer({ draft, onDraft, onSubmit, onAttach, disabled }) {
+function attachmentStatusText(status) {
+  if (status?.message) return status.message;
+  if (status?.status === "parsed") return "文件已保存，并读取到可用于后续诊断的简历原文。";
+  if (status?.status === "needs_review") return "文件已保存，但读取结果需要核对；未核对前不会展示能力结论。";
+  if (status?.status === "unreadable") return "文件已保存，但没有读取到可用文本；不会覆盖已有有效资料。";
+  return "文件已保存。正在等待读取结果；未读取前不会生成完整度或能力结论。";
+}
+
+function attachmentStatusBadge(status) {
+  if (status === "parsed") return "已读取";
+  if (status === "needs_review") return "待核对";
+  if (status === "unreadable") return "未读取";
+  return "待读取";
+}
+
+function EvidencePanel({ conversation, documents, activeDocument, annotations, variant, onDocument, onClose, onPrompt }) {
+  const hasAnnotations = annotations.length > 0;
+  const previewUrl = activeDocument
+    ? hasAnnotations
+      ? `/api/documents/${encodeURIComponent(activeDocument.id)}/annotated.pdf?inline=1`
+      : `/api/documents/${encodeURIComponent(activeDocument.id)}?inline=1`
+    : "";
+  const annotatedDownloadUrl = activeDocument ? `/api/documents/${encodeURIComponent(activeDocument.id)}/annotated.pdf` : "";
   return (
-    <div className="composer-dock">
-      <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
-        <textarea
-          value={draft}
-          onChange={(event) => onDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              onSubmit();
-            }
-          }}
-          placeholder="给 Career Agent 发消息"
-          aria-label="给 Career Agent 发消息"
-          rows={1}
-          disabled={disabled}
-        />
-        <div className="composer-actions">
-          <button type="button" onClick={onAttach} aria-label="上传简历"><Paperclip size={18} /></button>
-          <span>支持 PDF、Word、TXT</span>
-          <button className="send-button" type="submit" disabled={disabled || !draft.trim()} aria-label="发送">
-            {disabled ? <LoaderCircle className="spin" size={18} /> : <Send size={18} />}
-          </button>
+    <>
+    <button className="mobile-drawer panel-drawer" type="button" aria-label="关闭证据面板" onClick={onClose} />
+    <aside className="evidence-panel">
+      <header>
+        <div>
+          <span>Evidence</span>
+          <strong>原文与优化稿</strong>
         </div>
-      </form>
-      <p>Agent 只基于当前对话中的真实资料生成内容，请在投递前核对事实。</p>
+        <button type="button" className="drawer-close" onClick={onClose} aria-label="关闭证据面板"><X size={18} /></button>
+      </header>
+      <section className="document-tabs">
+        {documents.map((document) => (
+          <button key={document.id} type="button" className={document.id === activeDocument?.id ? "active" : ""} onClick={() => onDocument(document.id)}>
+            <FileText size={15} />{document.name}
+          </button>
+        ))}
+      </section>
+      {annotatedDownloadUrl && hasAnnotations ? (
+        <a className="annotated-download" href={annotatedDownloadUrl}><Download size={14} />下载批注版 PDF</a>
+      ) : null}
+      <section className="pdf-preview">
+        {previewUrl ? <iframe title={hasAnnotations ? "AI 批注 PDF 预览" : "原文件预览"} src={previewUrl} /> : <div><FileText size={28} /><p>上传简历后，这里显示原文和 AI 高亮批注。</p></div>}
+      </section>
+      <section className="annotation-list">
+        <h3>AI 证据批注</h3>
+        {annotations.length ? annotations.map((item) => <AnnotationCard key={item.id || item.quote} item={item} />) : <div className="panel-empty"><p>还没有批注。先分析简历，我会把问题定位到原文证据。</p><button type="button" onClick={() => onPrompt("分析这份简历")}>分析这份简历</button></div>}
+      </section>
+      <section className="variant-preview">
+        <div className="panel-title"><h3>优化稿</h3>{variant?.name ? <ResumeDownloads conversation={conversation} /> : null}</div>
+        {variant?.name ? <ResumePreview variant={variant} /> : <div className="panel-empty"><p>生成优化稿后，这里会显示 PDF 和 DOCX 下载。</p><button type="button" onClick={() => onPrompt("生成优化稿")}>生成优化稿</button></div>}
+      </section>
+    </aside>
+    </>
+  );
+}
+
+function AnnotationCard({ item }) {
+  return (
+    <article className={"annotation-card " + (item.severity || "medium")}>
+      <span className="annotation-source">{item.source === "rule" ? "基础检查" : "AI 批注"}</span>
+      <blockquote>{item.quote}</blockquote>
+      <strong>{item.issue}</strong>
+      <p>{item.suggestion}</p>
+      <small>{[item.section, item.reason].filter(Boolean).join(" · ")}</small>
+    </article>
+  );
+}
+
+function ResumeDownloads({ conversation }) {
+  if (!conversation) return null;
+  const base = `/api/conversations/${encodeURIComponent(conversation.id)}`;
+  return (
+    <div className="resume-downloads">
+      <a href={`${base}/resume.pdf`}><Download size={14} />PDF</a>
+      <a href={`${base}/resume.docx`}><Download size={14} />DOCX</a>
     </div>
   );
 }
 
-async function api(path, options = {}) {
-  const response = await fetch(API_BASE + path, options);
-  const data = await response.json();
-  if (!response.ok || data.ok === false) throw new Error(data.error || "HTTP " + response.status);
-  return data;
+function ResumePreview({ variant }) {
+  const sections = [
+    ["教育经历", variant.education],
+    ["技能", variant.skills],
+    ["项目经历", variant.projects],
+    ["工作与实习经历", variant.experience],
+    ["荣誉", variant.awards]
+  ];
+  return (
+    <article className="resume-preview">
+      <h2>{variant.name || "个人简历"}</h2>
+      <p>{[variant.targetTitle || variant.title, ...Object.values(variant.contact || {}).filter(Boolean)].filter(Boolean).join(" · ")}</p>
+      <p>{variant.summary}</p>
+      {sections.filter(([, items]) => items?.length).map(([title, items]) => (
+        <section key={title}>
+          <h4>{title}</h4>
+          {items.map((item) => <p key={item}>{item}</p>)}
+        </section>
+      ))}
+    </article>
+  );
 }
 
-function looksLikeResumeMaterial(value) {
-  const text = String(value || "");
-  return text.length > 80 && /教育经历|教育背景|项目经历|工作经历|实习经历|技能|GitHub|邮箱|电话/i.test(text);
+function SettingsPanel({ visible, settings, onClose, onSubmit }) {
+  const [mode, setMode] = useState(settings.mode || "default");
+  useEffect(() => {
+    if (visible) setMode(settings.mode || "default");
+  }, [visible, settings.mode]);
+  if (!visible) return null;
+  return (
+    <div className="settings-layer" role="dialog" aria-modal="true" aria-label="设置">
+      <form className="settings-panel" onSubmit={onSubmit}>
+        <button type="button" className="drawer-close" onClick={onClose} aria-label="关闭设置"><X size={18} /></button>
+        <h2>模型设置</h2>
+        <label>模式<select name="mode" value={mode} onChange={(event) => setMode(event.target.value)}><option value="default">默认</option><option value="custom">自定义</option></select></label>
+        {mode === "default" ? <p className="settings-note">使用系统提供的模型，无需配置。</p> : (
+          <div className="custom-settings">
+            <label>协议<select name="protocol" defaultValue={settings.protocol}><option value="openai">OpenAI compatible</option><option value="anthropic">Anthropic</option></select></label>
+            <label>Base URL<input name="baseUrl" defaultValue={settings.baseUrl || ""} placeholder="https://api.example.com/v1" /></label>
+            <label>模型<input name="model" defaultValue={settings.model || ""} placeholder="model name" /></label>
+            <label>API Key<input name="apiKey" type="password" placeholder={settings.hasApiKey ? "留空保留已有密钥" : "粘贴密钥"} /></label>
+          </div>
+        )}
+        <button type="submit">保存设置</button>
+      </form>
+    </div>
+  );
 }
 
-function looksLikeJobDescription(value) {
-  const text = String(value || "");
-  return text.length > 100 && /岗位职责|岗位要求|职位描述|任职要求|工作内容|我们希望/i.test(text);
+function ProjectEditor({ editor, onClose, onSubmit }) {
+  if (!editor) return null;
+  const project = editor.project;
+  return (
+    <div className="settings-layer" role="dialog" aria-modal="true" aria-label="项目命名">
+      <form className="settings-panel project-editor" onSubmit={onSubmit}>
+        <button type="button" className="drawer-close" onClick={onClose} aria-label="关闭项目命名"><X size={18} /></button>
+        <h2>{project ? "重命名项目" : "新建项目"}</h2>
+        <label>项目名称<input name="name" defaultValue={project?.name || ""} placeholder="例如：秋招 AI Agent 岗位" autoFocus required /></label>
+        <button type="submit">{project ? "保存名称" : "创建项目"}</button>
+      </form>
+    </div>
+  );
 }
 
-function createJobFromDescription(description) {
-  const firstLine = description.split(/\n/).map((item) => item.trim()).find(Boolean) || "自定义岗位";
+function AuthPanel({ mode, visible, notice, onMode, onClose, onSubmit }) {
+  if (!visible) return null;
+  return (
+    <div className="auth-layer" role="dialog" aria-modal="true" aria-label={mode === "login" ? "登录" : "注册"}>
+      <form className="auth-panel" onSubmit={onSubmit}>
+        <button type="button" className="drawer-close" onClick={onClose} aria-label="关闭"><X size={18} /></button>
+        <h2>{mode === "login" ? "登录" : "注册"}</h2>
+        {mode === "register" ? <label>姓名<input name="name" autoComplete="name" required /></label> : null}
+        <label>邮箱<input name="email" type="email" autoComplete="email" required /></label>
+        <label>密码<input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "register" ? 10 : undefined} required /></label>
+        {notice ? <p role="alert">{notice}</p> : null}
+        <button type="submit">{mode === "login" ? "登录" : "注册"}</button>
+        <button type="button" className="text-button" onClick={() => onMode(mode === "login" ? "register" : "login")}>
+          {mode === "login" ? "创建新账户" : "已有账户，去登录"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function scrubConversation(conversation) {
   return {
-    id: createId("custom-job"),
-    company: "自定义 JD",
-    title: firstLine.slice(0, 30),
-    role: inferRole(description),
-    location: "地点待确认",
-    description,
-    requirements: description.split(/\n/).map((item) => item.trim()).filter(Boolean).slice(0, 12),
-    matchScore: null
+    ...conversation,
+    title: readableDocumentName(conversation.title),
+    messages: (conversation.messages || []).map(scrubAssistantMessage)
   };
 }
 
-function inferRole(input = "", job = null) {
-  if (job?.role) return job.role;
-  const text = String(input || "");
-  if (/前端|React|Vue|TypeScript|交互/.test(text)) return "frontend";
-  if (/后端|FastAPI|Django|Java|数据库|接口/.test(text)) return "backend";
-  if (/产品|需求|PRD|用户研究/.test(text)) return "product";
-  if (/运营|增长|内容|转化/.test(text)) return "ops";
-  return "ai";
+function scrubAssistantMessage(message) {
+  if (message.kind === 'attachment' && message.data?.filename) {
+    const filename = readableDocumentName(message.data.filename);
+    return {...message,data:{...message.data,filename},content:String(message.content || '').replace(message.data.filename,filename)};
+  }
+  if (message.role !== "assistant") return message;
+  return { ...message, content: scrubBrand(message.content) };
 }
 
-function inferJobType(input = "") {
-  if (/实习/.test(input)) return "internship";
-  if (/社招|社会招聘/.test(input)) return "social";
-  return "campus";
+function scrubBrand(value = "") {
+  const vendorName = ["Mini", "Max"].join("");
+  return String(value)
+    .replace(new RegExp(vendorName, "gi"), "模型")
+    .replace(/M2\.7/gi, "默认模型");
 }
 
-function formatRelativeTime(value) {
-  const time = new Date(value).getTime();
-  const diff = Math.max(0, Date.now() - time);
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3_600_000) return Math.floor(diff / 60_000) + " 分钟前";
-  if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + " 小时前";
-  return new Date(value).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
-}
-
-function createId(prefix) {
-  return prefix + "-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+function readStoredTheme() {
+  try {
+    const value = localStorage.getItem(THEME_STORAGE_KEY);
+    return value === "dark" || value === "light" ? value : "light";
+  } catch {
+    return "light";
+  }
 }
 
 createRoot(document.getElementById("root")).render(

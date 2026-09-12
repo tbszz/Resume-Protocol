@@ -12,7 +12,7 @@ export const PROFILE_REQUIREMENTS = [
   {
     id: "education",
     label: "教育经历",
-    prompt: "请补充学校、专业、学历、入学/毕业时间、GPA/排名、核心课程。",
+    prompt: "请补充学校、专业、学历和预计毕业时间；成绩与课程仅在有助于目标岗位时提供。",
     isComplete(profile) {
       return profile.education.length > 0;
     }
@@ -30,7 +30,7 @@ export const PROFILE_REQUIREMENTS = [
     label: "项目经历",
     prompt: "请补充项目背景、你的职责、技术栈、关键难点、结果指标和链接。",
     isComplete(profile) {
-      return profile.projects.length >= 2;
+      return profile.projects.length >= 1;
     }
   },
   {
@@ -38,11 +38,12 @@ export const PROFILE_REQUIREMENTS = [
     label: "技能栈",
     prompt: "请补充语言、框架、数据库、AI 工具、工程工具和协作工具。",
     isComplete(profile) {
-      return profile.skills.length >= 6;
+      return profile.skills.length >= 1;
     }
   },
   {
     id: "awards",
+    optional: true,
     label: "荣誉/证书/竞赛",
     prompt: "请补充奖学金、竞赛奖项、证书、论文、开源贡献或可替代证明。",
     isComplete(profile) {
@@ -234,15 +235,17 @@ export function analyzeCompleteness(profile, options = {}) {
       id: item.id,
       label: item.label,
       complete,
-      prompt: complete ? "信息已满足当前生成要求。" : item.prompt,
+      optional: Boolean(item.optional),
+      prompt: complete ? "已提供相关材料，具体是否满足岗位要求仍需核对。" : item.prompt,
       evidence: collectEvidence(item.id, profile)
     };
   });
-  const completed = fields.filter((item) => item.complete).length;
+  const required = fields.filter(item=>!item.optional);
+  const completed = required.filter((item) => item.complete).length;
   return {
     fields,
-    missing: fields.filter((item) => !item.complete),
-    completeness: Math.round((completed / fields.length) * 100),
+    missing: required.filter((item) => !item.complete),
+    completeness: Math.round((completed / required.length) * 100),
     readyForResume: fields.every((item) => item.id === "awards" || item.complete)
   };
 }

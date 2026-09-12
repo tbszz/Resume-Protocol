@@ -3,15 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "server": "node server/index.js",
     "app": "npm run build && node server/index.js",
-    "test": "node src/chatStore.test.js && node src/chatResults.test.js && node src/agentIntent.test.js && node src/chatUi.contract.test.js && node server/resumeEngine.test.js && node server/campusAggregator.test.js && node server/githubJobSources.test.js"
+    "test": "node server/documentExtraction.test.js && node server/localOcr.test.js && node server/brain.test.js && node server/jobKnowledge.test.js && node server/careerPolicy.test.js && node src/documentName.test.js && node src/chatStore.test.js && node src/chatResults.test.js && node src/agentIntent.test.js && node src/chatUi.contract.test.js && node src/chatReliability.test.js && node server/resumeEngine.test.js && node server/campusAggregator.test.js && node server/githubJobSources.test.js && node server/database.test.js && node server/auth.test.js && node server/agent.test.js && node server/app.test.js && node server/generatedContent.test.js && node server/minimaxClient.test.js && node server/resumeExport.test.js && node server/modelSettings.test.js && node server/jobEligibility.test.js && node server/agentConversation.test.js && node server/claudeAgent.test.js && node src/workspaceRuntime.test.js",
+    "test:live": "node scripts/smoke-minimax.mjs",
+    "test:workspace-ui": "npm run build && node scripts/test-workspace-ui.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.269",
+    "@assistant-ui/react": "0.15.19",
     "@vitejs/plugin-react": "latest",
     "cors": "^2.8.6",
     "express": "^5.2.1",
@@ -22,6 +29,7 @@
     "playwright-core": "^1.60.0",
     "react": "latest",
     "react-dom": "latest",
-    "vite": "latest"
+    "vite": "latest",
+    "zod": "4.4.3"
   }
 }

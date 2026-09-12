@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { runCareerAgent, newMessage } from '../server/careerAgent.js';
+import { writeFileSync } from 'node:fs';
+process.loadEnvFile('.env');
+const conversation = {context:{material:'你好',profile:{name:'测试旧求职者'}},messages:[]};
+conversation.messages.push(newMessage('user','她说她要去喜茶摇奶茶，需要你帮忙做一份简历，有5年的品鉴经验，对于摇奶茶更是一流。'));
+await runCareerAgent({conversation,emit:()=>{},persist:()=>{},signal:AbortSignal.timeout(180000)});
+assert.equal(conversation.context.brain.subject,'new');
+assert(!conversation.context.profile || conversation.context.profile.name !== '测试旧求职者');
+assert(!conversation.messages.at(-1).content.includes('请先上传或粘贴真实简历'));
+assert.doesNotMatch(conversation.messages.at(-1).content,/通常要求实际门店操作经验|很有说服力的核心能力/);
+writeFileSync('tmp/brain-live-check.json',JSON.stringify(conversation,null,2));
+console.log(JSON.stringify({decision:conversation.context.brain,answer:conversation.messages.at(-1).content}));

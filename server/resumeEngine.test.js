@@ -70,4 +70,15 @@ Python、FastAPI、React、SQLite、RAG、Git`);
   assert.equal(parsed.profile.projects.some((item) => item.startsWith("技能")), false, "项目不得吞入技能 section");
 }
 
+{
+  const parsed = parseResumeText("田绿华 个人简历 基本信息 手机 13800138000 邮箱 tian@example.com 教育背景 某某大学 市场营销 本科 工作经历 喜茶门店服务，负责顾客接待、饮品制作和收银协作 项目经验 校园社群活动策划，负责物料筹备和现场执行 技能特长 门店服务、客户沟通、活动策划");
+  assert.equal(parsed.profile.contact.phone, "13800138000", "一行式 PDF 文本也应提取手机号");
+  assert.equal(parsed.profile.contact.email, "tian@example.com", "一行式 PDF 文本也应提取邮箱");
+  assert.equal(parsed.profile.education.some((item) => item.includes("某某大学")), true, "应识别教育背景");
+  assert.equal(parsed.profile.experience.some((item) => item.includes("喜茶门店服务")), true, "应识别非技术工作经历");
+  assert.equal(parsed.profile.projects.some((item) => item.includes("校园社群活动")), true, "应识别项目经验");
+  assert.equal(parsed.profile.skills.some((item) => item.includes("客户沟通")), true, "应保留简历技能段中的非技术技能");
+  assert.equal(parsed.profile.sourceConfidence >= 72, true, "真实简历不应被判为低置信空材料");
+}
+
 console.log("resumeEngine tests passed");

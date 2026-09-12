@@ -59,4 +59,51 @@ const fixedNow = "2026-09-07T03:00:00.000Z";
   assert.equal(loadChatState(storage, { id: "fallback", now: fixedNow }).activeConversationId, "fallback");
 }
 
+{
+  const memory = new Map();
+  const storage = {
+    getItem: (key) => memory.get(key) ?? null,
+    setItem: (key, value) => memory.set(key, value)
+  };
+  memory.set("resume-protocol.chat.v1", JSON.stringify({
+    version: 1,
+    activeConversationId: "legacy",
+    conversations: [
+      {
+        id: "legacy",
+        title: "旧会话",
+        messages: [
+          { id: "message-1", role: "user", content: "旧问题" },
+          null,
+          { id: "message-2", role: "assistant" },
+          { role: "assistant", content: "旧回答", createdAt: "2026-09-07T04:00:00.000Z" }
+        ]
+      }
+    ]
+  }));
+
+  const loaded = loadChatState(storage, { now: fixedNow });
+  const [conversation] = loaded.conversations;
+  assert.equal(conversation.createdAt, fixedNow);
+  assert.equal(conversation.updatedAt, fixedNow);
+  assert.deepEqual(conversation.context.jobs, []);
+  assert.equal(conversation.context.profile, null);
+  assert.deepEqual(conversation.messages.map((message) => message.content), ["旧问题", "旧回答"]);
+  assert.equal(conversation.messages[0].createdAt, fixedNow);
+  assert.ok(conversation.messages[1].id);
+}
+
+{
+  assert.equal(saveChatState(null, createChatState({ id: "chat-1", now: fixedNow })), false);
+}
+
+{
+  const storage = {
+    setItem: () => {
+      throw new Error("quota exceeded");
+    }
+  };
+  assert.equal(saveChatState(storage, createChatState({ id: "chat-1", now: fixedNow })), false);
+}
+
 console.log("chatStore tests passed");

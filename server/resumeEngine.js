@@ -141,7 +141,7 @@ export function parseResumeText(rawText = "") {
     website: firstMatch(text, /https?:\/\/(?!github\.com)[^\s，。)）]+/i)
   };
   const name = inferName(lines);
-  const skills = extractSkills(text);
+  const skills = dedupeStrings([...extractSkills(text), ...extractSkillItems(lines)]);
   const education = extractSection(lines, ["教育", "学校", "本科", "硕士", "大学", "学院", "专业"], 5);
   const projects = extractProjectBlocks(lines);
   const experience = extractExperienceBlocks(lines, projects);
@@ -319,11 +319,24 @@ export function createDemoJobs(profile, role = "ai") {
 }
 
 function normalize(rawText) {
-  return String(rawText || "")
+  const text = String(rawText || "")
     .replace(/\r/g, "\n")
     .replace(/\t/g, " ")
     .replace(/[ ]{2,}/g, " ")
     .trim();
+  return markResumeHeadings(text);
+}
+
+const RESUME_HEADINGS = [
+  "个人信息", "基本信息", "联系方式", "教育经历", "教育背景", "项目经历", "项目经验",
+  "实习经历", "工作经历", "工作经验", "实践经历", "校园经历", "专业技能", "技能特长",
+  "技能栈", "技能", "荣誉证书", "荣誉", "奖项", "证书", "自我评价", "个人简介"
+];
+
+function markResumeHeadings(text) {
+  return RESUME_HEADINGS.reduce((current, heading) => (
+    current.replace(new RegExp(`(^|[\\s。；;])${escapeRegExp(heading)}[：:]?(?=\\s|$)`, "g"), `$1\n${heading}\n`)
+  ), text).replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function firstMatch(text, regex) {
@@ -415,6 +428,13 @@ function inferTitle(skills, projects, experience) {
 function extractSkills(text) {
   const lower = text.toLowerCase();
   return SKILL_BANK.filter((skill) => lower.includes(skill.toLowerCase()) || text.includes(skill));
+}
+
+function extractSkillItems(lines) {
+  return extractNamedSection(lines, ["技能", "技能栈", "专业技能", "技能特长", "Skills"], "skills")
+    .flatMap((line) => line.split(/[、,，/|；;]+/))
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2 && item.length <= 32 && !/^技能/.test(item));
 }
 
 function extractSection(lines, keys, radius) {
@@ -550,6 +570,7 @@ function confidenceScore({ text, skills, projects, experience, education, contac
   let score = 20;
   if (text.length > 600) score += 18;
   if (skills.length >= 5) score += 18;
+  else if (skills.length >= 1) score += 8;
   if (projects.length) score += 18;
   if (experience.length) score += 10;
   if (education.length) score += 8;
